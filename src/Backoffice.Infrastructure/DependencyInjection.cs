@@ -2,12 +2,14 @@ using Backoffice.Application.Abstractions;
 using Backoffice.Application.Approvals;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
+using Backoffice.Application.Eventing;
 using Backoffice.Application.Executions;
 using Backoffice.Application.Investigations;
 using Backoffice.Application.Policy;
 using Backoffice.Application.Recommendations;
 using Backoffice.Infrastructure.Approvals;
 using Backoffice.Infrastructure.Documents;
+using Backoffice.Infrastructure.Eventing;
 using Backoffice.Infrastructure.Executions;
 using Backoffice.Infrastructure.Investigations;
 using Backoffice.Infrastructure.Persistence;
@@ -78,6 +80,17 @@ public static class DependencyInjection
             client.BaseAddress = new Uri(configuration["Opa:BaseUrl"] ?? "http://localhost:8181");
         });
         services.AddScoped<PolicyEnforcer>();
+
+        services.AddScoped<IOutboxRepository, OutboxRepository>();
+        services.AddScoped<IInboxRepository, InboxRepository>();
+        services.AddScoped<ITimerRepository, TimerRepository>();
+        services.AddScoped<IDeadLetterRepository, DeadLetterRepository>();
+        services.AddScoped<IReplayAuditRepository, ReplayAuditRepository>();
+        services.AddScoped<ScheduleTimerHandler>();
+        services.AddScoped<ListOutboxHandler>();
+        services.AddScoped<ListDeadLettersHandler>();
+        services.AddScoped<ListTimersHandler>();
+        services.AddScoped<ReplayDeadLetterHandler>();
 
         return services;
     }

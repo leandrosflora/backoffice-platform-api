@@ -67,6 +67,9 @@ public static class PolicyActions
     public const string ExecutionRead = "execution.read";
     public const string ReconciliationResolve = "reconciliation.resolve";
     public const string AuditRead = "audit.read";
+    public const string EventRead = "event.read";
+    public const string EventReplay = "event.replay";
+    public const string TimerSchedule = "timer.schedule";
 }
 
 public static class PolicyPurposes
@@ -75,6 +78,7 @@ public static class PolicyPurposes
     public const string Approval = "APPROVAL";
     public const string Execution = "EXECUTION";
     public const string Audit = "AUDIT";
+    public const string Operations = "OPERATIONS";
 }
 
 public static class PolicyResourceTypes
@@ -86,6 +90,9 @@ public static class PolicyResourceTypes
     public const string Approval = "APPROVAL";
     public const string Execution = "EXECUTION";
     public const string Audit = "AUDIT";
+    public const string Event = "EVENT";
+    public const string Timer = "TIMER";
+    public const string DeadLetter = "DEAD_LETTER";
 }
 
 public static class PolicySubjectTypes

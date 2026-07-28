@@ -5,6 +5,7 @@ using Backoffice.Api.Cases;
 using Backoffice.Api.Documents;
 using Backoffice.Api.Executions;
 using Backoffice.Api.Investigations;
+using Backoffice.Api.Operations;
 using Backoffice.Api.Recommendations;
 using Backoffice.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics;
@@ -42,6 +43,7 @@ app.MapInvestigationsEndpoints();
 app.MapRecommendationsEndpoints();
 app.MapApprovalsEndpoints();
 app.MapExecutionsEndpoints();
+app.MapOperationsEndpoints();
 
 app.Run();
 

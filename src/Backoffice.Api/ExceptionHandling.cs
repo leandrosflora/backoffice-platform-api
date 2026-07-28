@@ -7,6 +7,7 @@ using Backoffice.Application.Policy;
 using Backoffice.Application.Recommendations;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Documents;
+using Backoffice.Domain.Eventing;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,6 +27,7 @@ public sealed class BackofficeExceptionHandler : IExceptionHandler
             DocumentNotFoundException => (StatusCodes.Status404NotFound, "Document not found"),
             InvestigationNotFoundException => (StatusCodes.Status404NotFound, "Investigation not found"),
             ExecutionNotFoundException => (StatusCodes.Status404NotFound, "Execution not found"),
+            DeadLetterNotFoundException => (StatusCodes.Status404NotFound, "Dead letter not found"),
             PolicyDeniedException => (StatusCodes.Status403Forbidden, "Policy denied"),
             ObligationNotSatisfiedException => (StatusCodes.Status403Forbidden, "Obligation not satisfied"),
             PolicyDecisionPointUnavailableException => (StatusCodes.Status503ServiceUnavailable, "Policy decision point unavailable"),
@@ -37,6 +39,7 @@ public sealed class BackofficeExceptionHandler : IExceptionHandler
             NoValidApprovalException => (StatusCodes.Status409Conflict, "No valid approval"),
             IdempotencyConflictException => (StatusCodes.Status409Conflict, "Idempotency key conflict"),
             ExecutionNotAwaitingReconciliationException => (StatusCodes.Status409Conflict, "Execution not awaiting reconciliation"),
+            DeadLetterAlreadyReplayedException => (StatusCodes.Status409Conflict, "Dead letter already replayed"),
             NoGroundingEvidenceException => (StatusCodes.Status422UnprocessableEntity, "No grounding evidence"),
             BadHttpRequestException => (StatusCodes.Status400BadRequest, "Bad request"),
             _ => (StatusCodes.Status500InternalServerError, "Unexpected error"),
