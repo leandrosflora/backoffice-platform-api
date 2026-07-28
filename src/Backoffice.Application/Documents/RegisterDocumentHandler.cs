@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Policy;
@@ -12,6 +13,7 @@ public sealed class RegisterDocumentHandler(
     IDocumentRepository documentRepository,
     IEvidenceRepository evidenceRepository,
     IMalwareScanAdapter malwareScanAdapter,
+    IDocumentIntelligenceClient documentIntelligenceClient,
     IUnitOfWork unitOfWork,
     IClock clock,
     PolicyEnforcer policyEnforcer)
@@ -45,8 +47,11 @@ public sealed class RegisterDocumentHandler(
             new Dictionary<string, bool> { ["verify-case-version"] = true },
             cancellationToken);
 
+        var checksum = Convert.ToHexStringLower(SHA256.HashData(request.FileContent));
+        var storageReference = $"mock://documents/{Guid.NewGuid()}/{request.FileName}";
+
         var document = Document.Register(
-            caseId, tenantId, request.DocumentType, request.MediaType, request.Checksum, request.StorageReference, clock.UtcNow);
+            caseId, tenantId, request.DocumentType, request.MediaType, checksum, storageReference, clock.UtcNow);
         documentRepository.Add(document);
 
         // Intake acceptance transitions the case regardless of the eventual scan/validation
@@ -68,12 +73,20 @@ public sealed class RegisterDocumentHandler(
 
         document.ClearQuarantine();
 
-        var classificationScore = DocumentClassifier.TryScoreAgainstDeclaredType(request.StorageReference, request.DocumentType);
-        if (classificationScore.HasValue)
+        // Real AI/OCR classification+extraction, replacing the old deterministic keyword
+        // matcher (spec: document-intelligence, "AI-driven document classification"). The
+        // service classifies independently of the client's declared type; only a real,
+        // non-abstained match against what the client declared corroborates it as evidence —
+        // an abstention or a mismatched classification yields no evidence, exactly like the
+        // old classifier's "no keyword match" case (spec: document-intelligence, "abstains
+        // instead of guessing").
+        var analysis = await documentIntelligenceClient.AnalyzeAsync(
+            request.FileContent, request.FileName, request.MediaType.ToMimeType(), cancellationToken);
+        if (!analysis.Abstained && analysis.DocumentType == request.DocumentType.ToWireString())
         {
             evidenceRepository.Add(EvidenceRecord.Create(
                 caseId, tenantId, EvidenceType.ExtractedField, EvidenceSourceType.Document,
-                document.DocumentId.ToString(), document.Version.ToString(), classificationScore.Value,
+                document.DocumentId.ToString(), document.Version.ToString(), analysis.Confidence,
                 value: request.DocumentType.ToString(), checksum: document.Checksum, now: clock.UtcNow));
         }
 

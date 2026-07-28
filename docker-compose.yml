@@ -128,6 +128,26 @@ services:
       - jaeger
     profiles: [observability]
 
+  # Standalone AI/OCR document-analysis service (spec: document-analysis-service) —
+  # domain-agnostic; the disputes backend below is just one of its callers. Needs a real
+  # OpenAI API key (OPENAI_API_KEY on the host) since it calls the real API, not a mock.
+  document-intelligence:
+    build:
+      context: .
+      dockerfile: src/DocumentIntelligence.Api/Dockerfile
+    environment:
+      OpenAI__ApiKey: ${OPENAI_API_KEY:?Set OPENAI_API_KEY on the host}
+      OpenAI__Model: ${OPENAI_MODEL:-gpt-4o}
+    ports:
+      - "${DOCUMENT_INTELLIGENCE_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    profiles: [runtime, secure, distributed, observability]
+
   # --- .NET deployables ---
 
   # Named "vertical-slice" (not "api") so it satisfies observability/prometheus/prometheus.yml's
@@ -141,12 +161,15 @@ services:
       Opa__BaseUrl: http://opa:8181
       Otel__Endpoint: http://otel-collector:4317
       Identity__Mode: headers
+      DocumentIntelligence__BaseUrl: http://document-intelligence:8080
     ports:
       - "${APP_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
       opa:
+        condition: service_healthy
+      document-intelligence:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3"]
@@ -176,6 +199,8 @@ services:
         condition: service_healthy
       opa:
         condition: service_healthy
+      document-intelligence:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3"]
       interval: 5s
@@ -195,6 +220,8 @@ services:
       postgres:
         condition: service_healthy
       opa:
+        condition: service_healthy
+      document-intelligence:
         condition: service_healthy
       redpanda-init:
         condition: service_completed_successfully

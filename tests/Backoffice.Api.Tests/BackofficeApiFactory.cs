@@ -1,3 +1,4 @@
+using Backoffice.Application.Documents;
 using Backoffice.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -60,6 +61,11 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>, IAsyn
         builder.ConfigureServices(services =>
         {
             services.AddDbContext<BackofficeDbContext>(options => options.UseSqlite(_connection));
+
+            // Replaces the real HTTP-based client (which would otherwise call the paid
+            // OpenAI-backed document-analysis service) with a deterministic, free,
+            // filename-keyword fake — see FakeDocumentIntelligenceClient's own doc comment.
+            services.AddScoped<IDocumentIntelligenceClient, FakeDocumentIntelligenceClient>();
 
             using var scope = services.BuildServiceProvider().CreateScope();
             scope.ServiceProvider.GetRequiredService<BackofficeDbContext>().Database.EnsureCreated();

@@ -58,6 +58,11 @@ public static class DependencyInjection
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IEvidenceRepository, EvidenceRepository>();
         services.AddScoped<IMalwareScanAdapter, NoOpMalwareScanAdapter>();
+        services.AddHttpClient<IDocumentIntelligenceClient, HttpDocumentIntelligenceClient>(client =>
+        {
+            client.BaseAddress = new Uri(configuration["DocumentIntelligence:BaseUrl"] ?? "http://localhost:8090");
+            client.Timeout = TimeSpan.FromSeconds(35);
+        });
         services.AddScoped<RegisterDocumentHandler>();
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<ListEvidenceHandler>();

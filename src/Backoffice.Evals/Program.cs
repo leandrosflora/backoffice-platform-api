@@ -83,6 +83,75 @@ if (!allTasksPassed)
 }
 
 Console.WriteLine("Evaluation PASSED: all tasks and guardrails meet evals/thresholds.yaml.");
+
+// --- document-analysis-service (spec: document-analysis-service) — a separate dataset and
+// threshold file owned by this repo, not the sibling architecture repo's own evals/
+// thresholds.yaml, since this task didn't exist when that file was authored. Scores against
+// the same real, recorded OpenAI API response fixtures DocumentIntelligence.Api.Tests uses,
+// rather than making a live (paid, non-deterministic) API call on every CI eval run. ---
+var thisRepoRoot = ThisRepoLocator.FindRepoRoot();
+var documentAnalysisDatasetPath = Path.Combine(thisRepoRoot, "evals", "document-analysis-v1.jsonl");
+var documentAnalysisThresholdsPath = Path.Combine(thisRepoRoot, "evals", "document-analysis-thresholds.yaml");
+var fixturesDir = Path.Combine(thisRepoRoot, "tests", "DocumentIntelligence.Api.Tests", "Fixtures");
+
+var documentAnalysisThresholds = deserializer.Deserialize<ThresholdsConfig>(File.ReadAllText(documentAnalysisThresholdsPath));
+
+var daCorrect = 0;
+var daTotal = 0;
+var daAbstentionExpected = 0;
+var daAbstentionCorrect = 0;
+
+foreach (var line in File.ReadLines(documentAnalysisDatasetPath))
+{
+    if (string.IsNullOrWhiteSpace(line))
+    {
+        continue;
+    }
+
+    using var doc = JsonDocument.Parse(line);
+    var root = doc.RootElement;
+    var fixtureName = root.GetProperty("input").GetProperty("fixture").GetString()!;
+    var expected = root.GetProperty("expected");
+
+    using var fixtureDoc = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixturesDir, fixtureName)));
+    var fixtureRoot = fixtureDoc.RootElement;
+
+    var expectedType = expected.GetProperty("document_type").GetString();
+    var expectedAbstained = expected.GetProperty("abstained").GetBoolean();
+    var actualType = fixtureRoot.GetProperty("documentType").GetString();
+    var actualAbstained = fixtureRoot.GetProperty("abstained").GetBoolean();
+
+    var caseCorrect = actualType == expectedType && actualAbstained == expectedAbstained;
+    daTotal++;
+    daCorrect += caseCorrect ? 1 : 0;
+
+    if (expectedAbstained)
+    {
+        daAbstentionExpected++;
+        daAbstentionCorrect += caseCorrect ? 1 : 0;
+    }
+}
+
+var daScore = daTotal == 0 ? 1.0 : (double)daCorrect / daTotal;
+var daMinScore = documentAnalysisThresholds.Tasks.TryGetValue("document_analysis", out var daTaskThreshold)
+    ? daTaskThreshold.MinScore : documentAnalysisThresholds.OverallMinScore;
+var daPassed = daScore >= daMinScore;
+
+var daAbstentionRate = daAbstentionExpected == 0 ? 1.0 : (double)daAbstentionCorrect / daAbstentionExpected;
+var daGuardrailMin = documentAnalysisThresholds.Guardrails["document_analysis_abstention_rate"].Min;
+var daGuardrailPassed = daAbstentionRate >= daGuardrailMin;
+
+Console.WriteLine("\nEvaluation results (evals/document-analysis-v1.jsonl):");
+Console.WriteLine($"  document_analysis: {daCorrect}/{daTotal} = {daScore:0.###} (min {daMinScore:0.###}) {(daPassed ? "PASS" : "FAIL")}");
+Console.WriteLine($"  document_analysis_abstention_rate: {daAbstentionRate:0.###} (min {daGuardrailMin:0.###}) {(daGuardrailPassed ? "PASS" : "FAIL")}");
+
+if (!daPassed || !daGuardrailPassed)
+{
+    Console.Error.WriteLine("Evaluation FAILED: document-analysis task/guardrail below threshold.");
+    return 1;
+}
+
+Console.WriteLine("Evaluation PASSED: document-analysis meets evals/document-analysis-thresholds.yaml.");
 return 0;
 
 double AbstentionRate(string task)

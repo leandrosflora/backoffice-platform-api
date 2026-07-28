@@ -3,11 +3,18 @@ using Backoffice.Domain.Evidence;
 
 namespace Backoffice.Application.Documents;
 
+/// <summary>
+/// The client declares the type it believes the file is (matching what the case's dispute
+/// type requires) and supplies the real file bytes; the checksum is computed server-side from
+/// those bytes (no longer client-supplied — trusting a client-computed checksum was never
+/// meaningful once the server has the actual content to hash) and the storage reference is
+/// server-generated, since this system still has no real blob store behind it.
+/// </summary>
 public sealed record RegisterDocumentRequest(
     DocumentType DocumentType,
     MediaType MediaType,
-    string Checksum,
-    string StorageReference);
+    byte[] FileContent,
+    string FileName);
 
 public sealed record DocumentResponse(
     Guid DocumentId,

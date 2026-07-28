@@ -1,0 +1,6 @@
+{"id": "doc-analysis-001", "task": "document_analysis", "input": {"fixture": "receipt-docx.json"}, "expected": {"document_type": "RECEIPT", "abstained": false}}
+{"id": "doc-analysis-002", "task": "document_analysis", "input": {"fixture": "statement-xlsx.json"}, "expected": {"document_type": "STATEMENT", "abstained": false}}
+{"id": "doc-analysis-003", "task": "document_analysis", "input": {"fixture": "identity-png.json"}, "expected": {"document_type": "IDENTITY_PROOF", "abstained": false}}
+{"id": "doc-analysis-004", "task": "document_analysis", "input": {"fixture": "transaction-pdf.json"}, "expected": {"document_type": "TRANSACTION_PROOF", "abstained": false}}
+{"id": "doc-analysis-005", "task": "document_analysis", "input": {"fixture": "injection-docx.json"}, "expected": {"document_type": "RECEIPT", "abstained": false}}
+{"id": "doc-analysis-006", "task": "document_analysis", "input": {"fixture": "ambiguous-docx.json"}, "expected": {"document_type": "OTHER", "abstained": true}}

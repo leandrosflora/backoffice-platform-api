@@ -1,0 +1,10 @@
+# Local to this repo (not the sibling intelligent-backoffice-platform-architecture's own
+# evals/thresholds.yaml, which this change doesn't touch) — gates the new AI/OCR
+# document-analysis-service capability specifically (spec: document-analysis-service).
+overall_min_score: 1.0
+tasks:
+  document_analysis:
+    min_score: 1.0
+guardrails:
+  document_analysis_abstention_rate:
+    min: 1.0

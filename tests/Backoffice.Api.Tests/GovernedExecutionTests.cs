@@ -55,11 +55,7 @@ public class GovernedExecutionTests(BackofficeApiFactory factory) : IClassFixtur
         var caseResp = await recommenderClient.PostAsJsonAsync("/v1/cases", caseRequest, JsonOptions);
         var @case = await caseResp.Content.ReadFromJsonAsync<CaseResponse>(JsonOptions);
 
-        var docReq = new HttpRequestMessage(HttpMethod.Post, $"/v1/cases/{@case!.CaseId}/documents")
-        {
-            Content = JsonContent.Create(new RegisterDocumentRequest(DocumentType.Receipt, MediaType.ApplicationPdf, new string('a', 64), "receipt-2026.pdf"), options: JsonOptions),
-        };
-        docReq.Headers.TryAddWithoutValidation("If-Match", @case.CaseVersion.ToString());
+        var docReq = DocumentUploadTestHelper.BuildRequest(@case!.CaseId, @case.CaseVersion, DocumentType.Receipt, MediaType.ApplicationPdf, "receipt-2026.pdf");
         await recommenderClient.SendAsync(docReq);
         var caseAfterDoc = await (await recommenderClient.GetAsync($"/v1/cases/{@case.CaseId}")).Content.ReadFromJsonAsync<CaseResponse>(JsonOptions);
 

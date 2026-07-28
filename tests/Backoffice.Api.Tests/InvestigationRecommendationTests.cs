@@ -38,15 +38,9 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
     }
 
     private static async Task<CaseResponse> RegisterDocumentToValidatedAsync(
-        HttpClient client, Guid caseId, long expectedVersion, string storageReference)
+        HttpClient client, Guid caseId, long expectedVersion, string fileName)
     {
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"/v1/cases/{caseId}/documents")
-        {
-            Content = JsonContent.Create(
-                new RegisterDocumentRequest(DocumentType.Receipt, MediaType.ApplicationPdf, new string('a', 64), storageReference),
-                options: JsonOptions),
-        };
-        httpRequest.Headers.TryAddWithoutValidation("If-Match", expectedVersion.ToString());
+        var httpRequest = DocumentUploadTestHelper.BuildRequest(caseId, expectedVersion, DocumentType.Receipt, MediaType.ApplicationPdf, fileName);
         await client.SendAsync(httpRequest);
 
         return (await (await client.GetAsync($"/v1/cases/{caseId}")).Content.ReadFromJsonAsync<CaseResponse>(JsonOptions))!;

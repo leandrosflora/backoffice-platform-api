@@ -47,13 +47,7 @@ public class HumanApprovalTests(BackofficeApiFactory factory) : IClassFixture<Ba
     {
         var @case = await CreateCaseAsync(client, externalReference);
 
-        var docRequest = new HttpRequestMessage(HttpMethod.Post, $"/v1/cases/{@case.CaseId}/documents")
-        {
-            Content = JsonContent.Create(
-                new RegisterDocumentRequest(DocumentType.Receipt, MediaType.ApplicationPdf, new string('a', 64), "receipt-2026.pdf"),
-                options: JsonOptions),
-        };
-        docRequest.Headers.TryAddWithoutValidation("If-Match", @case.CaseVersion.ToString());
+        var docRequest = DocumentUploadTestHelper.BuildRequest(@case.CaseId, @case.CaseVersion, DocumentType.Receipt, MediaType.ApplicationPdf, "receipt-2026.pdf");
         await client.SendAsync(docRequest);
         var caseAfterDoc = await (await client.GetAsync($"/v1/cases/{@case.CaseId}")).Content.ReadFromJsonAsync<CaseResponse>(JsonOptions);
 

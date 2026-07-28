@@ -34,13 +34,9 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
     }
 
     private static Task<HttpResponseMessage> RegisterDocumentAsync(
-        HttpClient client, Guid caseId, long expectedVersion, RegisterDocumentRequest request)
+        HttpClient client, Guid caseId, long expectedVersion, DocumentType documentType, MediaType mediaType, string fileName)
     {
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"/v1/cases/{caseId}/documents")
-        {
-            Content = JsonContent.Create(request, options: JsonOptions),
-        };
-        httpRequest.Headers.TryAddWithoutValidation("If-Match", expectedVersion.ToString());
+        var httpRequest = DocumentUploadTestHelper.BuildRequest(caseId, expectedVersion, documentType, mediaType, fileName);
         return client.SendAsync(httpRequest);
     }
 
@@ -50,8 +46,8 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
         var client = CreateClient("tenant-doc-clean");
         var @case = await CreateCaseAsync(client, "ext-doc-clean-1", DisputeType.CardPurchase);
 
-        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion, new RegisterDocumentRequest(
-            DocumentType.Receipt, MediaType.ApplicationPdf, new string('a', 64), "receipt-2026-07.pdf"));
+        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion,
+            DocumentType.Receipt, MediaType.ApplicationPdf, "receipt-2026-07.pdf");
         var document = await response.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
@@ -74,8 +70,8 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
         var client = CreateClient("tenant-doc-malware");
         var @case = await CreateCaseAsync(client, "ext-doc-malware-1");
 
-        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion, new RegisterDocumentRequest(
-            DocumentType.Receipt, MediaType.ApplicationPdf, new string('b', 64), "eicar-test-file.pdf"));
+        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion,
+            DocumentType.Receipt, MediaType.ApplicationPdf, "eicar-test-file.pdf");
         var document = await response.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
 
         Assert.Equal(DocumentStatus.Rejected, document!.Status);
@@ -91,8 +87,8 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
         var client = CreateClient("tenant-doc-unknown");
         var @case = await CreateCaseAsync(client, "ext-doc-unknown-1");
 
-        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion, new RegisterDocumentRequest(
-            DocumentType.Receipt, MediaType.ApplicationPdf, new string('c', 64), "file-20260727-0001.pdf"));
+        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion,
+            DocumentType.Receipt, MediaType.ApplicationPdf, "file-20260727-0001.pdf");
         var document = await response.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
 
         Assert.Equal(DocumentStatus.Validated, document!.Status);
@@ -107,8 +103,8 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
     {
         var ownerClient = CreateClient("tenant-doc-owner");
         var @case = await CreateCaseAsync(ownerClient, "ext-doc-owner-1");
-        var registerResponse = await RegisterDocumentAsync(ownerClient, @case.CaseId, @case.CaseVersion, new RegisterDocumentRequest(
-            DocumentType.Receipt, MediaType.ApplicationPdf, new string('d', 64), "receipt-owner.pdf"));
+        var registerResponse = await RegisterDocumentAsync(ownerClient, @case.CaseId, @case.CaseVersion,
+            DocumentType.Receipt, MediaType.ApplicationPdf, "receipt-owner.pdf");
         var document = await registerResponse.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
 
         var otherClient = CreateClient("tenant-doc-other");
