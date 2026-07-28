@@ -84,7 +84,7 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
         {
             var rows = await scope.ServiceProvider.GetRequiredService<IOutboxRepository>().ListByTenantAsync("tenant-outbox-atomic", 10);
             Assert.Single(rows);
-            Assert.Equal("CaseCreated", rows[0].EventType);
+            Assert.Equal(EventTypes.CaseCreated, rows[0].EventType);
             Assert.Equal(OutboxStatus.Pending, rows[0].Status);
             Assert.Equal(@case.CaseId, rows[0].AggregateId);
         }
@@ -120,7 +120,7 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
 
         var consumeResult = ConsumeMatching(consumer, e => e.CaseId == @case.CaseId, TimeSpan.FromSeconds(20));
         var envelope = JsonSerializer.Deserialize<EventEnvelope>(consumeResult.Message.Value)!;
-        Assert.Equal("CaseCreated", envelope.EventType);
+        Assert.Equal(EventTypes.CaseCreated, envelope.EventType);
         Assert.Equal(@case.CaseId, envelope.CaseId);
 
         using (var scope = testServices.ScopeFactory.CreateScope())
@@ -279,7 +279,7 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
         var envelopeJson = JsonSerializer.Serialize(new
         {
             eventId,
-            eventType = "DecisionApproved",
+            eventType = EventTypes.DecisionApproved,
             eventVersion = 1,
             occurredAt,
             tenantId = "tenant-audit-ingest",
@@ -294,7 +294,7 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
             {
                 caseId,
                 caseVersion = 5,
-                eventType = "DecisionApproved",
+                eventType = EventTypes.DecisionApproved,
                 actorId = "approver-1",
                 origin = "approval",
                 reason = "approved within authority limit",
@@ -314,7 +314,7 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
             var records = await scope.ServiceProvider.GetRequiredService<IAuditRepository>().ListByTenantAsync("tenant-audit-ingest", 10);
             var record = Assert.Single(records);
             Assert.Equal(eventId, record.EventId);
-            Assert.Equal("DecisionApproved", record.EventType);
+            Assert.Equal(EventTypes.DecisionApproved, record.EventType);
             Assert.Equal(caseId, record.AggregateId);
             Assert.Equal("approval.decide", record.PolicyAction);
             Assert.Equal(["BR-012", "BR-013", "BR-014", "BR-015"], record.RuleReferences);

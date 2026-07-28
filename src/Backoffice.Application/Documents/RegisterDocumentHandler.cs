@@ -54,7 +54,7 @@ public sealed class RegisterDocumentHandler(
         if (@case.State == CaseState.Created)
         {
             @case.Transition(
-                @case.CaseVersion, CaseState.DocumentsReceived, "DocumentReceived", actorId, "document-intake",
+                @case.CaseVersion, CaseState.DocumentsReceived, EventTypes.DocumentReceived, actorId, "document-intake",
                 correlationId, null, "First document registered for the case.", clock.UtcNow);
         }
 
@@ -89,7 +89,7 @@ public sealed class RegisterDocumentHandler(
             if (DocumentRequirements.AreRequirementsSatisfied(@case.DisputeType, validatedTypes))
             {
                 @case.Transition(
-                    @case.CaseVersion, CaseState.DocumentsValidated, "DocumentValidated", actorId, "document-intake",
+                    @case.CaseVersion, CaseState.DocumentsValidated, EventTypes.DocumentValidated, actorId, "document-intake",
                     correlationId, null, "Required documents validated.", clock.UtcNow);
             }
         }

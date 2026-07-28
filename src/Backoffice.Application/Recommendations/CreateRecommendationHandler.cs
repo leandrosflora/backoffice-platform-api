@@ -81,14 +81,14 @@ public sealed class CreateRecommendationHandler(
         @case.RecordRecommendation(nextVersion, actorId);
 
         @case.Transition(
-            @case.CaseVersion, CaseState.DecisionProposed, "DecisionProposed", actorId, "recommendation",
+            @case.CaseVersion, CaseState.DecisionProposed, EventTypes.DecisionProposed, actorId, "recommendation",
             correlationId, null, "Recommendation created.", clock.UtcNow,
             decision.RuleReferences, PolicyActions.RecommendationCreate);
 
         if (decision.Outcome != RecommendationOutcome.Abstain)
         {
             @case.Transition(
-                @case.CaseVersion, CaseState.AwaitingApproval, "ApprovalRequested", actorId, "recommendation",
+                @case.CaseVersion, CaseState.AwaitingApproval, EventTypes.ApprovalRequested, actorId, "recommendation",
                 correlationId, null, "Actionable recommendation awaiting human approval.", clock.UtcNow,
                 BusinessRuleReferences.ApprovalRequested, PolicyActions.RecommendationCreate);
             @case.SetApprovalDeadline(clock.UtcNow.Add(Case.ApprovalWindow));

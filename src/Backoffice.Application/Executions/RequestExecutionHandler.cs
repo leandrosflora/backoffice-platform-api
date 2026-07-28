@@ -105,7 +105,7 @@ public sealed class RequestExecutionHandler(
         idempotencyRepository.Add(IdempotencyRecord.Create(tenantId, caseId, idempotencyKey, request.CommandHash, execution.ExecutionId, clock.UtcNow));
 
         @case.Transition(
-            @case.CaseVersion, CaseState.ExecutionPending, "ExecutionRequested", actorId, "execution",
+            @case.CaseVersion, CaseState.ExecutionPending, EventTypes.ExecutionRequested, actorId, "execution",
             correlationId, null, "Governed execution requested.", clock.UtcNow,
             BusinessRuleReferences.ExecutionRequested, PolicyActions.ExecutionRequest);
 
@@ -120,7 +120,7 @@ public sealed class RequestExecutionHandler(
             case ExecutionOutcome.Succeeded:
                 execution.MarkSucceeded(result.ExternalReference, clock.UtcNow);
                 @case.Transition(
-                    @case.CaseVersion, CaseState.Executed, "ExecutionCompleted", actorId, "execution",
+                    @case.CaseVersion, CaseState.Executed, EventTypes.ExecutionCompleted, actorId, "execution",
                     correlationId, null, "Execution succeeded.", clock.UtcNow,
                     BusinessRuleReferences.ExecutionCompleted, PolicyActions.ExecutionRequest);
                 RecordExecutionResult("succeeded");
@@ -128,7 +128,7 @@ public sealed class RequestExecutionHandler(
             case ExecutionOutcome.Failed:
                 execution.MarkFailed(clock.UtcNow);
                 @case.Transition(
-                    @case.CaseVersion, CaseState.Failed, "ExecutionFailed", actorId, "execution",
+                    @case.CaseVersion, CaseState.Failed, EventTypes.ExecutionFailed, actorId, "execution",
                     correlationId, null, "Execution failed.", clock.UtcNow,
                     BusinessRuleReferences.ExecutionFailed, PolicyActions.ExecutionRequest);
                 RecordExecutionResult("failed");
@@ -138,7 +138,7 @@ public sealed class RequestExecutionHandler(
                 // is the only path forward (spec: governed-execution).
                 execution.MarkReconciliationRequired(clock.UtcNow);
                 @case.Transition(
-                    @case.CaseVersion, CaseState.ReconciliationRequired, "ReconciliationRequired", actorId, "execution",
+                    @case.CaseVersion, CaseState.ReconciliationRequired, EventTypes.ReconciliationRequired, actorId, "execution",
                     correlationId, null, "Execution result was ambiguous; reconciliation required.", clock.UtcNow,
                     BusinessRuleReferences.ReconciliationRequired, PolicyActions.ExecutionRequest);
                 RecordExecutionResult("ambiguous");

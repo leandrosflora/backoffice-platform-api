@@ -137,19 +137,19 @@ public class GovernedExecutionTests(BackofficeApiFactory factory) : IClassFixtur
         var timeline = await (await approverClient.GetAsync($"/v1/cases/{@case.CaseId}/timeline")).Content
             .ReadFromJsonAsync<List<TimelineEntryResponse>>(JsonOptions);
 
-        var decisionProposed = timeline!.Single(t => t.EventType == "DecisionProposed");
+        var decisionProposed = timeline!.Single(t => t.EventType == EventTypes.DecisionProposed);
         Assert.NotEmpty(decisionProposed.RuleReferences);
         Assert.Equal("recommendation.create", decisionProposed.PolicyAction);
 
-        var decisionApproved = timeline.Single(t => t.EventType == "DecisionApproved");
+        var decisionApproved = timeline.Single(t => t.EventType == EventTypes.DecisionApproved);
         Assert.Equal(["BR-012", "BR-013", "BR-014", "BR-015"], decisionApproved.RuleReferences);
         Assert.Equal("approval.decide", decisionApproved.PolicyAction);
 
-        var executionRequested = timeline.Single(t => t.EventType == "ExecutionRequested");
+        var executionRequested = timeline.Single(t => t.EventType == EventTypes.ExecutionRequested);
         Assert.Equal(["BR-016", "BR-017", "BR-018", "BR-019"], executionRequested.RuleReferences);
         Assert.Equal("execution.request", executionRequested.PolicyAction);
 
-        var executionCompleted = timeline.Single(t => t.EventType == "ExecutionCompleted");
+        var executionCompleted = timeline.Single(t => t.EventType == EventTypes.ExecutionCompleted);
         Assert.Equal(["BR-018", "BR-021"], executionCompleted.RuleReferences);
         Assert.Equal("execution.request", executionCompleted.PolicyAction);
     }

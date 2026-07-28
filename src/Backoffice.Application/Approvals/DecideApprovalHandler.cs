@@ -88,10 +88,10 @@ public sealed class DecideApprovalHandler(
 
         var (toState, eventType, ruleReferences) = status switch
         {
-            ApprovalStatus.Approved => (CaseState.Approved, "DecisionApproved", BusinessRuleReferences.DecisionApproved),
-            ApprovalStatus.Rejected => (CaseState.Rejected, "DecisionRejected", BusinessRuleReferences.DecisionRejected),
+            ApprovalStatus.Approved => (CaseState.Approved, EventTypes.DecisionApproved, BusinessRuleReferences.DecisionApproved),
+            ApprovalStatus.Rejected => (CaseState.Rejected, EventTypes.DecisionRejected, BusinessRuleReferences.DecisionRejected),
             // Not a documented event in contracts/asyncapi/platform-events.yaml, so no BR-### to cite.
-            ApprovalStatus.MoreEvidenceRequired => (CaseState.MoreEvidenceRequired, "MoreEvidenceRequired", (IReadOnlyList<string>)[]),
+            ApprovalStatus.MoreEvidenceRequired => (CaseState.MoreEvidenceRequired, EventTypes.EvidenceMissing, (IReadOnlyList<string>)[]),
             _ => throw new ArgumentOutOfRangeException(),
         };
 

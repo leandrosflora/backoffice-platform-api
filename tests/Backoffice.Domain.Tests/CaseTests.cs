@@ -71,7 +71,7 @@ public class CaseTests
         @case.Transition(
             expectedVersion,
             CaseState.DocumentsReceived,
-            "DocumentReceived",
+            EventTypes.DocumentReceived,
             "actor-1",
             "documents",
             Guid.NewGuid(),
@@ -92,7 +92,7 @@ public class CaseTests
         @case.Transition(
             @case.CaseVersion,
             CaseState.DocumentsReceived,
-            "DocumentReceived",
+            EventTypes.DocumentReceived,
             "actor-1",
             "documents",
             Guid.NewGuid(),
@@ -102,7 +102,7 @@ public class CaseTests
             ruleReferences: ["BR-002", "BR-005"],
             policyAction: "document.register");
 
-        var entry = @case.Timeline.Single(t => t.EventType == "DocumentReceived");
+        var entry = @case.Timeline.Single(t => t.EventType == EventTypes.DocumentReceived);
         Assert.Equal(["BR-002", "BR-005"], entry.RuleReferences);
         Assert.Equal("document.register", entry.PolicyAction);
     }

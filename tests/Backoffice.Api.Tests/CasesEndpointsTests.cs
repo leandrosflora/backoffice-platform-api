@@ -167,7 +167,7 @@ public class CasesEndpointsTests(BackofficeApiFactory factory) : IClassFixture<B
         Assert.Equal(HttpStatusCode.OK, timelineResponse.StatusCode);
         Assert.Equal(2, entries!.Count);
         Assert.True(entries[0].CaseVersion < entries[1].CaseVersion);
-        Assert.Equal("CaseCreated", entries[0].EventType);
+        Assert.Equal(EventTypes.CaseCreated, entries[0].EventType);
         Assert.Equal("CaseCancelled", entries[1].EventType);
     }
 

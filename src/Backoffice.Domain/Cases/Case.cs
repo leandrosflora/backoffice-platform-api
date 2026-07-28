@@ -75,7 +75,7 @@ public sealed class Case
         @case.Timeline.Add(TimelineEntry.Create(
             @case.CaseId,
             @case.CaseVersion,
-            "CaseCreated",
+            EventTypes.CaseCreated,
             actorId,
             "case-intake",
             correlationId,
