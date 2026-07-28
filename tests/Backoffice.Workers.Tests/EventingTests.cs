@@ -379,6 +379,55 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
     }
 
     [Fact]
+    public async Task CorrelationId_PropagatesFromTransitionThroughOutboxKafkaAndConsumerToAuditRecord()
+    {
+        await using var testServices = await TestServices.CreateAsync(fixture.KafkaBootstrapServers);
+
+        // The correlationId a real API request would generate for this command.
+        var originalCorrelationId = Guid.NewGuid();
+        var @case = NewCase("tenant-trace-propagation", "ext-trace-propagation-1", testServices.Clock.UtcNow);
+        @case.Transition(
+            @case.CaseVersion, CaseState.AwaitingDocuments, "DocumentsRequested", "test-actor", "case-intake",
+            originalCorrelationId, null, "Awaiting documents.", testServices.Clock.UtcNow);
+
+        IKafkaClientFactory kafkaFactory;
+        KafkaSettings settings;
+        using (var scope = testServices.ScopeFactory.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ICaseRepository>().Add(@case);
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
+            kafkaFactory = scope.ServiceProvider.GetRequiredService<IKafkaClientFactory>();
+            settings = scope.ServiceProvider.GetRequiredService<IOptions<KafkaSettings>>().Value;
+        }
+
+        using var consumer = kafkaFactory.CreateConsumer($"test-consumer-{Guid.NewGuid():N}", "test-consumer");
+        consumer.Subscribe(settings.EventsTopic);
+
+        var dispatcher = new OutboxDispatcherWorker(testServices.ScopeFactory, kafkaFactory, testServices.Clock, NullLogger<OutboxDispatcherWorker>.Instance);
+        using var producer = kafkaFactory.CreateProducer("test-outbox-publisher-trace");
+        await dispatcher.DispatchOnceAsync(producer, CancellationToken.None);
+
+        var consumeResult = ConsumeMatching(consumer, e => e.CaseId == @case.CaseId && e.EventType == "DocumentsRequested", TimeSpan.FromSeconds(20));
+        var consumedEnvelope = JsonSerializer.Deserialize<EventEnvelope>(consumeResult.Message.Value)!;
+
+        // 1. The same correlationId survives the outbox write and the real Kafka round-trip.
+        Assert.Equal(originalCorrelationId, consumedEnvelope.CorrelationId);
+
+        var workflowWorker = new WorkflowConsumerWorker(
+            testServices.ScopeFactory, kafkaFactory, Microsoft.Extensions.Options.Options.Create(settings), testServices.Clock, NullLogger<WorkflowConsumerWorker>.Instance);
+        using var dlqProducer = kafkaFactory.CreateProducer("test-dlq-producer-trace");
+        await workflowWorker.ProcessMessageAsync(consumeResult.Message.Value, dlqProducer, settings, CancellationToken.None);
+
+        // 2. And it's still the same correlationId on the audit record the worker ingests.
+        using (var scope = testServices.ScopeFactory.CreateScope())
+        {
+            var records = await scope.ServiceProvider.GetRequiredService<IAuditRepository>().ListByTenantAsync("tenant-trace-propagation", 10);
+            var record = Assert.Single(records);
+            Assert.Equal(originalCorrelationId, record.CorrelationId);
+        }
+    }
+
+    [Fact]
     public async Task DeadLetterReplay_PreservesOriginalPayload_UnderNewEventId()
     {
         await using var testServices = await TestServices.CreateAsync(fixture.KafkaBootstrapServers);

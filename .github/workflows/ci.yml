@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The eval harness and OPA test fixture locate the sibling
+          # intelligent-backoffice-platform-architecture checkout by walking up from
+          # AppContext.BaseDirectory — both repos must be checked out side by side.
+          path: intelligent-backoffice-platform
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/intelligent-backoffice-platform-architecture
+          path: intelligent-backoffice-platform-architecture
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Install OPA
+        run: |
+          curl -L -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+          chmod +x /usr/local/bin/opa
+          echo "OPA_EXECUTABLE=/usr/local/bin/opa" >> "$GITHUB_ENV"
+
+      - name: Restore
+        working-directory: intelligent-backoffice-platform
+        run: dotnet restore
+
+      - name: Build
+        working-directory: intelligent-backoffice-platform
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        working-directory: intelligent-backoffice-platform
+        # Backoffice.Api.Tests runs a real OPA subprocess (see OPA_EXECUTABLE above);
+        # Backoffice.Workers.Tests starts a real Kafka broker via the Docker daemon already
+        # available on GitHub-hosted runners — neither is mocked (spec: policy-authorization,
+        # eventing-reliability).
+        run: dotnet test --no-build --configuration Release
+
+      - name: Run deterministic evaluation harness
+        working-directory: intelligent-backoffice-platform
+        # Fails the build (non-zero exit) on any evals/thresholds.yaml miss (spec:
+        # observability-evaluation, "Deterministic evaluation harness").
+        run: dotnet run --project src/Backoffice.Evals --configuration Release --no-build
+
+      - name: Validate Prometheus alert/recording rules
+        run: |
+          docker run --rm \
+            -v "$PWD/intelligent-backoffice-platform-architecture/observability/prometheus:/rules:ro" \
+            --entrypoint promtool \
+            prom/prometheus:v2.53.1 \
+            check rules /rules/alerts.yml /rules/recording-rules.yml
