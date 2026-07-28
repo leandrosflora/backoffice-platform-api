@@ -1,5 +1,6 @@
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Cases;
+using Backoffice.Application.Policy;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Documents;
 using Backoffice.Domain.Evidence;
@@ -12,7 +13,8 @@ public sealed class RegisterDocumentHandler(
     IEvidenceRepository evidenceRepository,
     IMalwareScanAdapter malwareScanAdapter,
     IUnitOfWork unitOfWork,
-    IClock clock)
+    IClock clock,
+    PolicyEnforcer policyEnforcer)
 {
     public async Task<DocumentResponse> HandleAsync(
         string tenantId,
@@ -20,6 +22,8 @@ public sealed class RegisterDocumentHandler(
         long expectedVersion,
         RegisterDocumentRequest request,
         string actorId,
+        IReadOnlyList<string> roles,
+        string subjectType,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
@@ -30,6 +34,16 @@ public sealed class RegisterDocumentHandler(
         {
             throw new CaseVersionConflictException(expectedVersion, @case.CaseVersion);
         }
+
+        await policyEnforcer.EnforceAsync(new AuthorizationInput(
+            new PolicySubject(actorId, subjectType, tenantId, roles),
+            PolicyActions.DocumentRegister,
+            new PolicyResource(PolicyResourceTypes.Document, caseId.ToString(), tenantId, @case.State.ToWireString()),
+            PolicyPurposes.CaseProcessing,
+            correlationId.ToString(),
+            new Dictionary<string, object?> { ["case_version"] = expectedVersion }),
+            new Dictionary<string, bool> { ["verify-case-version"] = true },
+            cancellationToken);
 
         var document = Document.Register(
             caseId, tenantId, request.DocumentType, request.MediaType, request.Checksum, request.StorageReference, clock.UtcNow);

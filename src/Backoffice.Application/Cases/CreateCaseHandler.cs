@@ -1,11 +1,12 @@
 using System.Globalization;
 using Backoffice.Application.Abstractions;
+using Backoffice.Application.Policy;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Common;
 
 namespace Backoffice.Application.Cases;
 
-public sealed class CreateCaseHandler(ICaseRepository repository, IUnitOfWork unitOfWork, IClock clock)
+public sealed class CreateCaseHandler(ICaseRepository repository, IUnitOfWork unitOfWork, IClock clock, PolicyEnforcer policyEnforcer)
 {
     /// <summary>
     /// Idempotent case intake keyed by (tenantId, externalReference): a repeat
@@ -16,9 +17,19 @@ public sealed class CreateCaseHandler(ICaseRepository repository, IUnitOfWork un
         string tenantId,
         CreateCaseRequest request,
         string actorId,
+        IReadOnlyList<string> roles,
+        string subjectType,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
+        await policyEnforcer.EnforceAsync(new AuthorizationInput(
+            new PolicySubject(actorId, subjectType, tenantId, roles),
+            PolicyActions.CaseCreate,
+            new PolicyResource(PolicyResourceTypes.Case, request.ExternalReference, tenantId),
+            PolicyPurposes.CaseProcessing,
+            correlationId.ToString(),
+            []), cancellationToken: cancellationToken);
+
         var existing = await repository.FindByExternalReferenceAsync(tenantId, request.ExternalReference, cancellationToken);
         if (existing is not null)
         {

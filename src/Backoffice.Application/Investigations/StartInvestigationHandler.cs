@@ -1,6 +1,7 @@
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
+using Backoffice.Application.Policy;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Investigations;
 
@@ -11,7 +12,8 @@ public sealed class StartInvestigationHandler(
     IEvidenceRepository evidenceRepository,
     IInvestigationRepository investigationRepository,
     IUnitOfWork unitOfWork,
-    IClock clock)
+    IClock clock,
+    PolicyEnforcer policyEnforcer)
 {
     public async Task<InvestigationResponse> HandleAsync(
         string tenantId,
@@ -19,6 +21,8 @@ public sealed class StartInvestigationHandler(
         long expectedVersion,
         StartInvestigationRequest request,
         string actorId,
+        IReadOnlyList<string> roles,
+        string subjectType,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
@@ -30,22 +34,35 @@ public sealed class StartInvestigationHandler(
             throw new CaseVersionConflictException(expectedVersion, @case.CaseVersion);
         }
 
-        // Idempotent per contract (x-idempotent: true on investigation.execute): a case
-        // already under investigation can start another investigation pass without a
-        // further state transition; any other state is an invalid transition attempt.
-        if (@case.State == CaseState.DocumentsValidated)
-        {
-            @case.Transition(
-                @case.CaseVersion, CaseState.UnderInvestigation, "InvestigationStarted", actorId, "investigation",
-                correlationId, null, "Investigation started.", clock.UtcNow);
-        }
-        else if (@case.State != CaseState.UnderInvestigation)
-        {
-            throw new InvalidCaseTransitionException(@case.State, CaseState.UnderInvestigation);
-        }
-
         var evidence = await evidenceRepository.ListByCaseAsync(tenantId, caseId, cancellationToken);
         var evidenceIds = evidence.Select(e => e.EvidenceId).ToList();
+
+        // policies/authorization.rego's investigation.execute rule requires resource.state ==
+        // DOCUMENTS_VALIDATED and evidence_present — stricter than this handler's own prior
+        // interim allowance (retrying while already UNDER_INVESTIGATION, or with no evidence
+        // at all). OPA is authoritative and unmodified, so both are now enforced exactly as
+        // the policy defines them (spec: policy-authorization, "Every gated action...").
+        await policyEnforcer.EnforceAsync(new AuthorizationInput(
+            new PolicySubject(actorId, subjectType, tenantId, roles),
+            PolicyActions.InvestigationExecute,
+            new PolicyResource(PolicyResourceTypes.Case, caseId.ToString(), tenantId, @case.State.ToWireString()),
+            PolicyPurposes.CaseProcessing,
+            correlationId.ToString(),
+            new Dictionary<string, object?>
+            {
+                ["case_version"] = expectedVersion,
+                ["evidence_references"] = evidenceIds.Select(id => id.ToString()).ToList(),
+            }),
+            new Dictionary<string, bool>
+            {
+                ["verify-case-version"] = true,
+                ["verify-evidence"] = evidenceIds.Count > 0,
+            },
+            cancellationToken);
+
+        @case.Transition(
+            @case.CaseVersion, CaseState.UnderInvestigation, "InvestigationStarted", actorId, "investigation",
+            correlationId, null, "Investigation started.", clock.UtcNow);
 
         var findings = InvestigationEngine.Run(evidenceIds);
         var investigation = Investigation.Complete(caseId, tenantId, findings, clock.UtcNow);

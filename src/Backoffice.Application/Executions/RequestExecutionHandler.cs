@@ -1,6 +1,7 @@
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Approvals;
 using Backoffice.Application.Cases;
+using Backoffice.Application.Policy;
 using Backoffice.Domain.Approvals;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Executions;
@@ -16,7 +17,8 @@ public sealed class RequestExecutionHandler(
     IIdempotencyRecordRepository idempotencyRepository,
     IExecutionGateway gateway,
     IUnitOfWork unitOfWork,
-    IClock clock)
+    IClock clock,
+    PolicyEnforcer policyEnforcer)
 {
     public async Task<RequestExecutionResult> HandleAsync(
         string tenantId,
@@ -24,17 +26,19 @@ public sealed class RequestExecutionHandler(
         string idempotencyKey,
         RequestExecutionRequest request,
         string actorId,
+        IReadOnlyList<string> roles,
+        string subjectType,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
         var @case = await caseRepository.FindByIdAsync(tenantId, caseId, cancellationToken)
             ?? throw new CaseNotFoundException(caseId);
 
-        if (request.CaseVersion != @case.CaseVersion)
-        {
-            throw new CaseVersionConflictException(request.CaseVersion, @case.CaseVersion);
-        }
-
+        // Idempotency replay is checked before the case-version check: a replay of an
+        // already-processed request must still return the original result even after the
+        // case has since moved on (e.g. the execution already completed and advanced the
+        // case's version) — only a genuinely new request is held to the caller's expected
+        // version (spec: governed-execution, "Idempotent execution").
         var existingRecord = await idempotencyRepository.FindAsync(tenantId, caseId, idempotencyKey, cancellationToken);
         if (existingRecord is not null)
         {
@@ -46,6 +50,11 @@ public sealed class RequestExecutionHandler(
             var existingExecution = await executionRepository.FindByIdAsync(tenantId, caseId, existingRecord.ExecutionId, cancellationToken)
                 ?? throw new ExecutionNotFoundException(existingRecord.ExecutionId);
             return new RequestExecutionResult(existingExecution.ToResponse(), IsReplay: true);
+        }
+
+        if (request.CaseVersion != @case.CaseVersion)
+        {
+            throw new CaseVersionConflictException(request.CaseVersion, @case.CaseVersion);
         }
 
         var approval = await approvalRepository.FindByIdAsync(tenantId, caseId, request.ApprovalId, cancellationToken);
@@ -60,6 +69,32 @@ public sealed class RequestExecutionHandler(
         {
             throw new NoValidApprovalException(caseId);
         }
+
+        await policyEnforcer.EnforceAsync(new AuthorizationInput(
+            new PolicySubject(actorId, subjectType, tenantId, roles),
+            PolicyActions.ExecutionRequest,
+            new PolicyResource(PolicyResourceTypes.Execution, caseId.ToString(), tenantId, @case.State.ToWireString()),
+            PolicyPurposes.Execution,
+            correlationId.ToString(),
+            new Dictionary<string, object?>
+            {
+                ["case_version"] = @case.CaseVersion,
+                ["approval_status"] = "APPROVED",
+                ["approval_valid"] = true,
+                ["recommendation_version"] = request.RecommendationVersion,
+                ["approved_recommendation_version"] = @case.ApprovedRecommendationVersion,
+                ["idempotency_key"] = idempotencyKey,
+                ["command_hash"] = request.CommandHash,
+                ["evidence_references"] = request.EvidenceReferences.Select(id => id.ToString()).ToList(),
+            }),
+            new Dictionary<string, bool>
+            {
+                ["verify-case-version"] = true,
+                ["verify-approval"] = true,
+                ["verify-idempotency"] = !string.IsNullOrEmpty(idempotencyKey),
+                ["verify-evidence"] = request.EvidenceReferences.Count > 0,
+            },
+            cancellationToken);
 
         var execution = Execution.Create(caseId, tenantId, idempotencyKey, request.CommandHash, clock.UtcNow);
         executionRepository.Add(execution);

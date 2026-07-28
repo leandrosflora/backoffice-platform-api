@@ -1,20 +1,19 @@
-using Backoffice.Application.Cases;
+using Backoffice.Application.Executions;
 
-namespace Backoffice.Api.Cases;
+namespace Backoffice.Api.Executions;
 
 /// <summary>
-/// Maps the case-management surface of contracts/openapi/paths/cases.yaml.
+/// Maps the execution/reconciliation surface of contracts/openapi/paths/execution-audit.yaml.
 /// </summary>
-public static class CasesEndpoints
+public static class ExecutionsEndpoints
 {
-    public static IEndpointRouteBuilder MapCasesEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapExecutionsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/v1/cases");
-
-        group.MapPost("/", async (
-            CreateCaseRequest request,
+        app.MapPost("/v1/cases/{caseId:guid}/executions", async (
+            Guid caseId,
+            RequestExecutionRequest request,
             HttpRequest httpRequest,
-            CreateCaseHandler handler,
+            RequestExecutionHandler handler,
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
@@ -22,14 +21,23 @@ public static class CasesEndpoints
             var roles = RequestContext.GetRoles(httpRequest);
             var subjectType = RequestContext.GetSubjectType(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
+            var idempotencyKey = RequestContext.RequireIdempotencyKey(httpRequest);
 
-            var response = await handler.HandleAsync(tenantId, request, actorId, roles, subjectType, correlationId, cancellationToken);
-            return Results.Created($"/v1/cases/{response.CaseId}", response);
+            var result = await handler.HandleAsync(
+                tenantId, caseId, idempotencyKey, request, actorId, roles, subjectType, correlationId, cancellationToken);
+
+            // 200 for an idempotent replay, 202 for a freshly accepted execution (contract:
+            // contracts/openapi/paths/execution-audit.yaml).
+            return result.IsReplay
+                ? Results.Ok(result.Execution)
+                : Results.Accepted($"/v1/cases/{caseId}/executions/{result.Execution.ExecutionId}", result.Execution);
         });
 
-        group.MapGet("/", async (
+        app.MapGet("/v1/cases/{caseId:guid}/executions/{executionId:guid}", async (
+            Guid caseId,
+            Guid executionId,
             HttpRequest httpRequest,
-            ListCasesHandler handler,
+            GetExecutionHandler handler,
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
@@ -38,14 +46,14 @@ public static class CasesEndpoints
             var subjectType = RequestContext.GetSubjectType(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
 
-            var response = await handler.HandleAsync(tenantId, actorId, roles, subjectType, correlationId, cancellationToken);
+            var response = await handler.HandleAsync(tenantId, caseId, executionId, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Ok(response);
         });
 
-        group.MapGet("/{caseId:guid}", async (
+        app.MapGet("/v1/cases/{caseId:guid}/executions", async (
             Guid caseId,
             HttpRequest httpRequest,
-            GetCaseHandler handler,
+            ListExecutionsHandler handler,
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
@@ -58,11 +66,12 @@ public static class CasesEndpoints
             return Results.Ok(response);
         });
 
-        group.MapPost("/{caseId:guid}/cancel", async (
+        app.MapPost("/v1/cases/{caseId:guid}/reconciliations/{executionId:guid}/resolve", async (
             Guid caseId,
-            CancelCaseBody body,
+            Guid executionId,
+            ResolveReconciliationRequest request,
             HttpRequest httpRequest,
-            CancelCaseHandler handler,
+            ResolveReconciliationHandler handler,
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
@@ -70,31 +79,12 @@ public static class CasesEndpoints
             var roles = RequestContext.GetRoles(httpRequest);
             var subjectType = RequestContext.GetSubjectType(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
-            var expectedVersion = RequestContext.RequireIfMatch(httpRequest);
 
             var response = await handler.HandleAsync(
-                tenantId, caseId, expectedVersion, actorId, roles, subjectType, correlationId, body.Reason, cancellationToken);
-            return Results.Ok(response);
-        });
-
-        group.MapGet("/{caseId:guid}/timeline", async (
-            Guid caseId,
-            HttpRequest httpRequest,
-            GetCaseTimelineHandler handler,
-            CancellationToken cancellationToken) =>
-        {
-            var tenantId = RequestContext.RequireTenantId(httpRequest);
-            var actorId = RequestContext.GetActorId(httpRequest);
-            var roles = RequestContext.GetRoles(httpRequest);
-            var subjectType = RequestContext.GetSubjectType(httpRequest);
-            var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
-
-            var response = await handler.HandleAsync(tenantId, caseId, actorId, roles, subjectType, correlationId, cancellationToken);
+                tenantId, caseId, executionId, request, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Ok(response);
         });
 
         return app;
     }
 }
-
-public sealed record CancelCaseBody(string Reason);

@@ -2,6 +2,7 @@ using Backoffice.Application.Abstractions;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
 using Backoffice.Application.Investigations;
+using Backoffice.Application.Policy;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Recommendations;
 
@@ -13,13 +14,16 @@ public sealed class CreateRecommendationHandler(
     IEvidenceRepository evidenceRepository,
     IRecommendationRepository recommendationRepository,
     IUnitOfWork unitOfWork,
-    IClock clock)
+    IClock clock,
+    PolicyEnforcer policyEnforcer)
 {
     public async Task<RecommendationResponse> HandleAsync(
         string tenantId,
         Guid caseId,
         CreateRecommendationRequest request,
         string actorId,
+        IReadOnlyList<string> roles,
+        string subjectType,
         Guid correlationId,
         CancellationToken cancellationToken = default)
     {
@@ -31,9 +35,13 @@ public sealed class CreateRecommendationHandler(
             throw new CaseVersionConflictException(request.CaseVersion, @case.CaseVersion);
         }
 
-        // AwaitingApproval is allowed too: a newer recommendation may supersede one still
-        // pending human decision (spec: investigation-decision, "Recommendation versioning").
-        if (@case.State is not (CaseState.UnderInvestigation or CaseState.DecisionProposed or CaseState.AwaitingApproval))
+        // policies/authorization.rego's recommendation.create rule requires resource.state ==
+        // UNDER_INVESTIGATION exactly — narrower than this handler's prior interim allowance
+        // (also permitting a superseding recommendation while AWAITING_APPROVAL). OPA is
+        // authoritative and unmodified, so only the UNDER_INVESTIGATION entry point remains;
+        // reaching UNDER_INVESTIGATION again after MORE_EVIDENCE_REQUIRED is a re-investigation
+        // concern OPA's rule set does not yet define, so that loop is out of scope here.
+        if (@case.State != CaseState.UnderInvestigation)
         {
             throw new InvalidCaseTransitionException(@case.State, CaseState.DecisionProposed);
         }
@@ -48,6 +56,20 @@ public sealed class CreateRecommendationHandler(
             throw new NoGroundingEvidenceException(caseId);
         }
 
+        await policyEnforcer.EnforceAsync(new AuthorizationInput(
+            new PolicySubject(actorId, subjectType, tenantId, roles),
+            PolicyActions.RecommendationCreate,
+            new PolicyResource(PolicyResourceTypes.Recommendation, caseId.ToString(), tenantId, @case.State.ToWireString()),
+            PolicyPurposes.CaseProcessing,
+            correlationId.ToString(),
+            new Dictionary<string, object?>
+            {
+                ["case_version"] = @case.CaseVersion,
+                ["evidence_references"] = evidenceIds.Select(id => id.ToString()).ToList(),
+            }),
+            new Dictionary<string, bool> { ["verify-case-version"] = true, ["verify-evidence"] = true },
+            cancellationToken);
+
         var decision = RecommendationEngine.Decide(investigation.Findings, evidenceIds);
         var nextVersion = (@case.RecommendationVersion ?? 0) + 1;
 
@@ -58,16 +80,11 @@ public sealed class CreateRecommendationHandler(
 
         @case.RecordRecommendation(nextVersion, actorId);
 
-        if (@case.State == CaseState.UnderInvestigation)
-        {
-            @case.Transition(
-                @case.CaseVersion, CaseState.DecisionProposed, "DecisionProposed", actorId, "recommendation",
-                correlationId, null, "Recommendation created.", clock.UtcNow);
-        }
+        @case.Transition(
+            @case.CaseVersion, CaseState.DecisionProposed, "DecisionProposed", actorId, "recommendation",
+            correlationId, null, "Recommendation created.", clock.UtcNow);
 
-        // Only advance to AwaitingApproval; if the case is already there (a superseding
-        // recommendation), leave it — AwaitingApproval has no self-transition in CaseLifecycle.
-        if (@case.State == CaseState.DecisionProposed && decision.Outcome != RecommendationOutcome.Abstain)
+        if (decision.Outcome != RecommendationOutcome.Abstain)
         {
             @case.Transition(
                 @case.CaseVersion, CaseState.AwaitingApproval, "ApprovalRequested", actorId, "recommendation",

@@ -22,6 +22,7 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, tenantId);
         client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, "test-actor");
+        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,document-processor,auditor");
         return client;
     }
 

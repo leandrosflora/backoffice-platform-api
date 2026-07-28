@@ -58,4 +58,35 @@ public static class RequestContext
         && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : decimal.MaxValue;
+
+    /// <summary>Required for every governed-execution request (spec: governed-execution, BR-017).</summary>
+    public static string RequireIdempotencyKey(HttpRequest request)
+    {
+        if (!request.Headers.TryGetValue("Idempotency-Key", out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            throw new BadHttpRequestException("Header 'Idempotency-Key' is required.");
+        }
+
+        return value.ToString();
+    }
+
+    /// <summary>
+    /// Interim stand-in for the roles a validated JWT would carry (section 11 replaces this).
+    /// Comma-separated; absent/empty means no roles, so OPA's default-deny applies rather
+    /// than silently granting broad access.
+    /// </summary>
+    public const string RolesHeader = "X-Roles";
+
+    public static IReadOnlyList<string> GetRoles(HttpRequest request) =>
+        request.Headers.TryGetValue(RolesHeader, out var value)
+            ? value.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+
+    /// <summary>Interim stand-in for the subject_type a validated JWT would carry (HUMAN|WORKLOAD).</summary>
+    public const string SubjectTypeHeader = "X-Subject-Type";
+
+    public static string GetSubjectType(HttpRequest request) =>
+        request.Headers.TryGetValue(SubjectTypeHeader, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value.ToString()
+            : Backoffice.Application.Policy.PolicySubjectTypes.Human;
 }

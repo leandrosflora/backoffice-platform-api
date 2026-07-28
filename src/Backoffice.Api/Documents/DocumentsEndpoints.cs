@@ -18,11 +18,13 @@ public static class DocumentsEndpoints
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
             var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
             var expectedVersion = RequestContext.RequireIfMatch(httpRequest);
 
             var response = await handler.HandleAsync(
-                tenantId, caseId, expectedVersion, request, actorId, correlationId, cancellationToken);
+                tenantId, caseId, expectedVersion, request, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Accepted($"/v1/cases/{caseId}/documents/{response.DocumentId}", response);
         });
 
@@ -34,7 +36,12 @@ public static class DocumentsEndpoints
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
-            var response = await handler.HandleAsync(tenantId, caseId, documentId, cancellationToken);
+            var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
+            var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
+
+            var response = await handler.HandleAsync(tenantId, caseId, documentId, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Ok(response);
         });
 
@@ -45,7 +52,12 @@ public static class DocumentsEndpoints
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
-            var response = await handler.HandleAsync(tenantId, caseId, cancellationToken);
+            var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
+            var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
+
+            var response = await handler.HandleAsync(tenantId, caseId, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Ok(response);
         });
 

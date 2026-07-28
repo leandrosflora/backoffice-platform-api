@@ -27,6 +27,10 @@ public class HumanApprovalTests(BackofficeApiFactory factory) : IClassFixture<Ba
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, tenantId);
         client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, actorId);
+        // Roles cover both halves of the recommend-then-approve workflow this fixture drives;
+        // segregation-of-duties/alçada are actor-identity and authority-limit checks, not
+        // role-based, so granting every client the same roles doesn't weaken those scenarios.
+        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,operations-analyst,approver");
         return client;
     }
 
@@ -163,10 +167,14 @@ public class HumanApprovalTests(BackofficeApiFactory factory) : IClassFixture<Ba
             ConfigureTestServices = services =>
                 services.AddSingleton<Backoffice.Application.Abstractions.IClock>(fakeClock),
         };
+        // Manually constructed (not fixture-injected), so xUnit never calls IAsyncLifetime
+        // on it automatically — start the OPA subprocess explicitly before first use.
+        await ((IAsyncLifetime)expiryFactory).InitializeAsync();
 
         var client = expiryFactory.CreateClient();
         client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, "tenant-approval-expiry");
         client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, "recommender-expiry");
+        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,operations-analyst,approver");
 
         var (@case, _, _) = await BringToAwaitingApprovalAsync(client, "ext-approval-expiry-1");
         Assert.Equal(CaseState.AwaitingApproval, @case.State);

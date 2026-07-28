@@ -6,6 +6,8 @@ namespace Backoffice.Api;
 /// <summary>
 /// Maps PascalCase enum members (e.g. CardPurchase) to the SCREAMING_SNAKE_CASE
 /// values used throughout contracts/schemas/canonical-models-base.yaml (e.g. CARD_PURCHASE).
+/// Same algorithm as Backoffice.Application.Policy.PolicyWireFormat.ToWireString — kept
+/// separate since JsonNamingPolicy.ConvertName operates on a bare string, not an Enum.
 /// </summary>
 public sealed class ScreamingSnakeCaseNamingPolicy : JsonNamingPolicy
 {

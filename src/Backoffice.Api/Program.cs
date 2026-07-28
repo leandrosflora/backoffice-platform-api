@@ -3,6 +3,7 @@ using Backoffice.Api;
 using Backoffice.Api.Approvals;
 using Backoffice.Api.Cases;
 using Backoffice.Api.Documents;
+using Backoffice.Api.Executions;
 using Backoffice.Api.Investigations;
 using Backoffice.Api.Recommendations;
 using Backoffice.Infrastructure;
@@ -19,7 +20,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
 }
 else
 {
-    builder.Services.AddInfrastructureCore();
+    builder.Services.AddInfrastructureCore(builder.Configuration);
 }
 builder.Services.AddExceptionHandler<BackofficeExceptionHandler>();
 builder.Services.AddProblemDetails();
@@ -40,6 +41,7 @@ app.MapDocumentsEndpoints();
 app.MapInvestigationsEndpoints();
 app.MapRecommendationsEndpoints();
 app.MapApprovalsEndpoints();
+app.MapExecutionsEndpoints();
 
 app.Run();
 

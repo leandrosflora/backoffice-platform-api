@@ -18,9 +18,11 @@ public static class RecommendationsEndpoints
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
             var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
 
-            var response = await handler.HandleAsync(tenantId, caseId, request, actorId, correlationId, cancellationToken);
+            var response = await handler.HandleAsync(tenantId, caseId, request, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Created($"/v1/cases/{caseId}/recommendations/{response.RecommendationId}", response);
         });
 

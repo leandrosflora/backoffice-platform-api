@@ -26,6 +26,7 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, tenantId);
         client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, "test-actor");
+        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,operations-analyst,auditor");
         return client;
     }
 
@@ -66,7 +67,7 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
             $"/v1/cases/{caseId}/recommendations", new CreateRecommendationRequest(caseVersion, investigationId), JsonOptions);
 
     [Fact]
-    public async Task StartInvestigation_NoEvidence_ProducesMissingDataFinding()
+    public async Task StartInvestigation_NoEvidence_IsRejectedByPolicy()
     {
         var client = CreateClient("tenant-inv-empty");
         var @case = await CreateCaseAsync(client, "ext-inv-empty-1");
@@ -76,12 +77,13 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
         var caseAfterDoc = await RegisterDocumentToValidatedAsync(client, @case.CaseId, @case.CaseVersion, "file-0001.pdf");
         Assert.Equal(CaseState.DocumentsValidated, caseAfterDoc.State);
 
+        // policies/authorization.rego's investigation.execute rule requires evidence_present,
+        // so a case with zero evidence is denied (403) before InvestigationEngine ever runs.
+        // The MissingData-finding path for zero-evidence input is still covered directly
+        // against InvestigationEngine by Backoffice.Evals, bypassing HTTP/OPA.
         var response = await StartInvestigationAsync(client, @case.CaseId, caseAfterDoc.CaseVersion);
-        var investigation = await response.Content.ReadFromJsonAsync<InvestigationResponse>(JsonOptions);
 
-        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
-        Assert.Single(investigation!.Findings);
-        Assert.Equal(FindingKind.MissingData, investigation.Findings[0].Kind);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]
@@ -97,24 +99,6 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
         Assert.Single(investigation!.Findings);
         Assert.Equal(FindingKind.ConfirmedFact, investigation.Findings[0].Kind);
         Assert.NotEmpty(investigation.Findings[0].EvidenceReferences);
-    }
-
-    [Fact]
-    public async Task CreateRecommendation_NoEvidenceAtAll_ReturnsUnprocessableEntity()
-    {
-        var client = CreateClient("tenant-rec-noevidence");
-        var @case = await CreateCaseAsync(client, "ext-rec-noevidence-1");
-        var caseAfterDoc = await RegisterDocumentToValidatedAsync(client, @case.CaseId, @case.CaseVersion, "file-0002.pdf");
-
-        var investigationResponse = await StartInvestigationAsync(client, @case.CaseId, caseAfterDoc.CaseVersion);
-        var investigation = await investigationResponse.Content.ReadFromJsonAsync<InvestigationResponse>(JsonOptions);
-
-        var caseAfterInvestigation = await (await client.GetAsync($"/v1/cases/{@case.CaseId}")).Content
-            .ReadFromJsonAsync<CaseResponse>(JsonOptions);
-
-        var response = await CreateRecommendationAsync(client, @case.CaseId, caseAfterInvestigation!.CaseVersion, investigation!.InvestigationId);
-
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
     }
 
     [Fact]
@@ -142,12 +126,14 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
             .ReadFromJsonAsync<CaseResponse>(JsonOptions);
         Assert.Equal(CaseState.AwaitingApproval, caseAfterRecommendation!.State);
 
-        // Calling again (e.g. a superseding recommendation before approval) increments the version.
+        // CreateRecommendationHandler's own state pre-check (matching
+        // policies/authorization.rego's recommendation.create rule, which requires
+        // resource.state == UNDER_INVESTIGATION exactly) now rejects a superseding
+        // recommendation while AWAITING_APPROVAL as an invalid transition, before OPA is
+        // even consulted — previously this handler allowed it to test version-incrementing.
         var secondResponse = await CreateRecommendationAsync(
             client, @case.CaseId, caseAfterRecommendation.CaseVersion, investigation.InvestigationId);
-        var secondRecommendation = await secondResponse.Content.ReadFromJsonAsync<RecommendationResponse>(JsonOptions);
 
-        Assert.Equal(HttpStatusCode.Created, secondResponse.StatusCode);
-        Assert.Equal(2, secondRecommendation!.RecommendationVersion);
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
     }
 }

@@ -4,12 +4,14 @@ using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
 using Backoffice.Application.Executions;
 using Backoffice.Application.Investigations;
+using Backoffice.Application.Policy;
 using Backoffice.Application.Recommendations;
 using Backoffice.Infrastructure.Approvals;
 using Backoffice.Infrastructure.Documents;
 using Backoffice.Infrastructure.Executions;
 using Backoffice.Infrastructure.Investigations;
 using Backoffice.Infrastructure.Persistence;
+using Backoffice.Infrastructure.Policy;
 using Backoffice.Infrastructure.Recommendations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -29,14 +31,14 @@ public static class DependencyInjection
         services.AddDbContext<BackofficeDbContext>(options =>
             options.UseNpgsql(configuration.GetConnectionString("Backoffice")));
 
-        return services.AddInfrastructureCore();
+        return services.AddInfrastructureCore(configuration);
     }
 
     /// <summary>
     /// Registers the persistence-agnostic bindings (repositories, unit of work, clock)
     /// shared by production and test hosts, regardless of which DbContext provider is used.
     /// </summary>
-    public static IServiceCollection AddInfrastructureCore(this IServiceCollection services)
+    public static IServiceCollection AddInfrastructureCore(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<ICaseRepository, CaseRepository>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
@@ -62,6 +64,20 @@ public static class DependencyInjection
 
         services.AddScoped<IApprovalRepository, ApprovalRepository>();
         services.AddScoped<DecideApprovalHandler>();
+
+        services.AddScoped<IExecutionRepository, ExecutionRepository>();
+        services.AddScoped<IIdempotencyRecordRepository, IdempotencyRecordRepository>();
+        services.AddScoped<IExecutionGateway, MockExecutionGateway>();
+        services.AddScoped<RequestExecutionHandler>();
+        services.AddScoped<ResolveReconciliationHandler>();
+        services.AddScoped<GetExecutionHandler>();
+        services.AddScoped<ListExecutionsHandler>();
+
+        services.AddHttpClient<IPolicyDecisionClient, OpaPolicyDecisionClient>(client =>
+        {
+            client.BaseAddress = new Uri(configuration["Opa:BaseUrl"] ?? "http://localhost:8181");
+        });
+        services.AddScoped<PolicyEnforcer>();
 
         return services;
     }

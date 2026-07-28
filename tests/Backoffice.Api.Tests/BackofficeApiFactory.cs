@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Backoffice.Api.Tests;
 
@@ -15,10 +16,17 @@ namespace Backoffice.Api.Tests;
 /// child" across separate DbContext instances pointed at the same store (a documented
 /// limitation, since it isn't a real relational engine) — SQLite in-memory mode avoids
 /// that entirely while still requiring no external database for tests.
+///
+/// Also starts a real standalone OPA server process running the unmodified
+/// policies/authorization.rego, so every test in this project exercises the actual policy
+/// decision point rather than a stub (spec: policy-authorization). IAsyncLifetime is used
+/// (not the constructor) because xUnit's IClassFixture activation requires a single public
+/// parameterless constructor and cannot await async startup there.
 /// </summary>
-public sealed class BackofficeApiFactory : WebApplicationFactory<Program>
+public sealed class BackofficeApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    private OpaTestServer? _opaServer;
 
     /// <summary>
     /// Optional service overrides (e.g. a fake IClock) applied after the DbContext is
@@ -28,6 +36,10 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>
     /// </summary>
     public Action<IServiceCollection>? ConfigureTestServices { get; set; }
 
+    /// <summary>The real OPA test server's base URL, available once InitializeAsync has run.</summary>
+    public string OpaBaseUrl => _opaServer?.BaseUrl
+        ?? throw new InvalidOperationException("OPA test server has not started yet.");
+
     public BackofficeApiFactory()
     {
         // Required: a SQLite ":memory:" database only exists while its connection is open,
@@ -35,9 +47,15 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>
         _connection.Open();
     }
 
+    public async Task InitializeAsync()
+    {
+        _opaServer = await OpaTestServer.StartAsync();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseSetting("Opa:BaseUrl", OpaBaseUrl);
 
         builder.ConfigureServices(services =>
         {
@@ -51,12 +69,20 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>
         });
     }
 
+    async Task IAsyncLifetime.DisposeAsync()
+    {
+        // Disposing _opaServer happens in Dispose(bool) below, which base.DisposeAsync()
+        // triggers — do not also dispose it here, or the process gets torn down twice.
+        await base.DisposeAsync();
+    }
+
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
         if (disposing)
         {
             _connection.Dispose();
+            _opaServer?.Dispose();
         }
     }
 }

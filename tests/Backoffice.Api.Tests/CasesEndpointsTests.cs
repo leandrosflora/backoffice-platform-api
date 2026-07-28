@@ -21,6 +21,10 @@ public class CasesEndpointsTests(BackofficeApiFactory factory) : IClassFixture<B
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, tenantId);
         client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, "test-actor");
+        // case-manager covers create/read/cancel; auditor covers the timeline (audit.read).
+        // A single test actor holding both roles is a simplification — real deployments
+        // would segregate these (spec: policy-authorization).
+        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,auditor");
         return client;
     }
 
@@ -118,7 +122,7 @@ public class CasesEndpointsTests(BackofficeApiFactory factory) : IClassFixture<B
     }
 
     [Fact]
-    public async Task CancelCase_AlreadyCancelled_IsRejectedAsInvalidTransition()
+    public async Task CancelCase_AlreadyCancelled_IsRejectedByPolicy()
     {
         var client = CreateClient("tenant-double-cancel");
         var created = await ReadCaseAsync((await PostCaseAsync(client, NewCaseRequest("ext-double-cancel-1"))).Content);
@@ -138,7 +142,10 @@ public class CasesEndpointsTests(BackofficeApiFactory factory) : IClassFixture<B
         secondCancel.Headers.TryAddWithoutValidation("If-Match", cancelled!.CaseVersion.ToString());
         var secondResponse = await client.SendAsync(secondCancel);
 
-        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+        // policies/authorization.rego's case.cancel rule only allows a fixed set of
+        // pre-cancellation states; CANCELLED isn't among them, so OPA denies (403) before
+        // the domain's own invalid-transition guard (409) is ever reached.
+        Assert.Equal(HttpStatusCode.Forbidden, secondResponse.StatusCode);
     }
 
     [Fact]

@@ -18,11 +18,13 @@ public static class ApprovalsEndpoints
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
             var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
             var authorityLimit = RequestContext.GetAuthorityLimit(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
 
             var response = await handler.HandleAsync(
-                tenantId, caseId, request, actorId, authorityLimit, correlationId, cancellationToken);
+                tenantId, caseId, request, actorId, roles, subjectType, authorityLimit, correlationId, cancellationToken);
             return Results.Created($"/v1/cases/{caseId}/approvals/{response.ApprovalId}", response);
         });
 

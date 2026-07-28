@@ -18,11 +18,13 @@ public static class InvestigationsEndpoints
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
             var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
             var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
             var expectedVersion = RequestContext.RequireIfMatch(httpRequest);
 
             var response = await handler.HandleAsync(
-                tenantId, caseId, expectedVersion, request, actorId, correlationId, cancellationToken);
+                tenantId, caseId, expectedVersion, request, actorId, roles, subjectType, correlationId, cancellationToken);
             return Results.Accepted($"/v1/cases/{caseId}/investigations/{response.InvestigationId}", response);
         });
 
