@@ -165,4 +165,25 @@ public sealed class Case
         ApprovalDeadline = null;
         return true;
     }
+
+    /// <summary>
+    /// Fired by the timer worker when a `CASE_EXPIRY` timer becomes due (spec:
+    /// eventing-reliability, "Case expiry timer transitions a stale case"). Unlike
+    /// <see cref="ExpireApprovalIfDue"/> (scoped to the approval-window deadline), this
+    /// applies to any state from which EXPIRED is a valid transition per
+    /// <see cref="CaseLifecycle"/> — a case that has since moved past such a state (e.g.
+    /// already cancelled or executed) is left untouched rather than throwing.
+    /// </summary>
+    public bool ExpireIfEligible(Guid correlationId, DateTimeOffset now)
+    {
+        if (!CaseLifecycle.CanTransition(State, CaseState.Expired))
+        {
+            return false;
+        }
+
+        Transition(
+            CaseVersion, CaseState.Expired, "CaseExpired", "timer-worker", "case-expiry",
+            correlationId, null, "Case expiry timer fired.", now);
+        return true;
+    }
 }

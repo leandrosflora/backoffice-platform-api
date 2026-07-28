@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.17" />
   </ItemGroup>
 
@@ -15,5 +16,9 @@
     <ProjectReference Include="..\Backoffice.Application\Backoffice.Application.csproj" />
     <ProjectReference Include="..\Backoffice.Infrastructure\Backoffice.Infrastructure.csproj" />
     <ProjectReference Include="..\Backoffice.Domain\Backoffice.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Backoffice.Workers.Tests" />
   </ItemGroup>
 </Project>

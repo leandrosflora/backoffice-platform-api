@@ -94,4 +94,17 @@ public static class DependencyInjection
 
         return services;
     }
+
+    /// <summary>
+    /// Kafka client construction, used only by the Backoffice.Workers host — the Api host
+    /// never produces/consumes directly, it only reads the outbox/timer/dead-letter tables
+    /// through the repositories registered above.
+    /// </summary>
+    public static IServiceCollection AddKafkaEventing(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<KafkaSettings>(configuration.GetSection("Kafka"));
+        services.AddSingleton<IKafkaClientFactory, KafkaClientFactory>();
+
+        return services;
+    }
 }
