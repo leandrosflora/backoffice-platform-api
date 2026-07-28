@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Backoffice.Application.Cases;
+using Backoffice.Application.Identity;
 using Backoffice.Application.Policy;
 using Backoffice.Domain.Cases;
 using Microsoft.Extensions.DependencyInjection;
@@ -73,7 +74,7 @@ public class PolicyEnforcementTests(BackofficeApiFactory factory) : IClassFixtur
         // OPA involved. Simulates OPA allowing an action but returning an obligation
         // (verify-case-version) that the caller cannot confirm as satisfied.
         var fakeClient = new AlwaysAllowWithObligationClient("verify-case-version");
-        var enforcer = new PolicyEnforcer(fakeClient);
+        var enforcer = new PolicyEnforcer(fakeClient, new NullCallerIdentityAccessor());
 
         var input = new AuthorizationInput(
             new PolicySubject("test-actor", PolicySubjectTypes.Human, "tenant-obligation", ["case-manager"]),
@@ -94,7 +95,7 @@ public class PolicyEnforcementTests(BackofficeApiFactory factory) : IClassFixtur
     public async Task Enforce_ObligationConfirmedServerSide_Succeeds()
     {
         var fakeClient = new AlwaysAllowWithObligationClient("verify-case-version");
-        var enforcer = new PolicyEnforcer(fakeClient);
+        var enforcer = new PolicyEnforcer(fakeClient, new NullCallerIdentityAccessor());
 
         var input = new AuthorizationInput(
             new PolicySubject("test-actor", PolicySubjectTypes.Human, "tenant-obligation-ok", ["case-manager"]),

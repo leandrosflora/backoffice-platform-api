@@ -4,11 +4,14 @@ using Backoffice.Api.Approvals;
 using Backoffice.Api.Cases;
 using Backoffice.Api.Documents;
 using Backoffice.Api.Executions;
+using Backoffice.Api.Identity;
 using Backoffice.Api.Investigations;
 using Backoffice.Api.Observability;
 using Backoffice.Api.Operations;
 using Backoffice.Api.Recommendations;
+using Backoffice.Application.Identity;
 using Backoffice.Infrastructure;
+using Backoffice.Infrastructure.Identity;
 using Backoffice.Infrastructure.Observability;
 using Microsoft.AspNetCore.Diagnostics;
 
@@ -36,9 +39,19 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddObservability(builder.Configuration, serviceName: "backoffice-api", isHttpHost: true);
 builder.Services.AddEventingGauges();
 
+// Secure/jwt profile (spec: identity-security). IJwtIdentityValidator is registered as a
+// singleton but constructed lazily — the middleware only resolves it inside the jwt-mode
+// branch, so a default "headers" profile app never needs Identity:PublicKeyPath configured.
+builder.Services.Configure<IdentityOptions>(builder.Configuration.GetSection("Identity"));
+builder.Services.AddSingleton<IJwtIdentityValidator, JwtIdentityValidator>();
+builder.Services.AddHttpContextAccessor();
+// Overrides AddInfrastructureCore's NullCallerIdentityAccessor — registered last, so it wins.
+builder.Services.AddScoped<ICallerIdentityAccessor, HttpContextCallerIdentityAccessor>();
+
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseMiddleware<JwtIdentityMiddleware>();
 app.UseMiddleware<HttpMetricsMiddleware>();
 app.MapPrometheusScrapingEndpoint();
 app.Services.GetRequiredService<EventingGaugeRegistrar>(); // eagerly registers the outbox/dead-letter/timer gauges

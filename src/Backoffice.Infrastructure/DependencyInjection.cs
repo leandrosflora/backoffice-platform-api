@@ -5,6 +5,7 @@ using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
 using Backoffice.Application.Eventing;
 using Backoffice.Application.Executions;
+using Backoffice.Application.Identity;
 using Backoffice.Application.Investigations;
 using Backoffice.Application.Policy;
 using Backoffice.Application.Recommendations;
@@ -82,6 +83,11 @@ public static class DependencyInjection
             client.BaseAddress = new Uri(configuration["Opa:BaseUrl"] ?? "http://localhost:8181");
         });
         services.AddScoped<PolicyEnforcer>();
+        // Default no-op registration so PolicyEnforcer resolves in every host (e.g.
+        // Backoffice.Workers, which never actually calls EnforceAsync); the Api host
+        // overrides this with a real HttpContext-backed accessor (registered after this
+        // call wins, same "last registration wins" pattern used for test IClock overrides).
+        services.AddScoped<ICallerIdentityAccessor, NullCallerIdentityAccessor>();
 
         services.AddScoped<IOutboxRepository, OutboxRepository>();
         services.AddScoped<IInboxRepository, InboxRepository>();
