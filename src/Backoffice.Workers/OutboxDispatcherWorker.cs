@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Eventing;
+using Backoffice.Application.Observability;
 using Backoffice.Domain.Eventing;
 using Backoffice.Infrastructure.Eventing;
 using Confluent.Kafka;
@@ -60,6 +61,11 @@ public sealed class OutboxDispatcherWorker(
 
         foreach (var message in claimed)
         {
+            using var activity = BackofficeActivitySource.Instance.StartActivity("outbox.dispatch");
+            activity?.SetTag("case_id", message.AggregateId);
+            activity?.SetTag("tenant_id", message.TenantId);
+            activity?.SetTag("correlation_id", message.CorrelationId);
+
             try
             {
                 var envelope = EventEnvelope.FromOutboxMessage(message);

@@ -1,4 +1,5 @@
 using Backoffice.Domain.Common;
+using Backoffice.Domain.Observability;
 
 namespace Backoffice.Domain.Cases;
 
@@ -112,9 +113,14 @@ public sealed class Case
             throw new InvalidCaseTransitionException(State, to);
         }
 
+        var fromState = State;
         State = to;
         CaseVersion++;
         UpdatedAt = now;
+
+        DomainMetrics.WorkflowTransitionsTotal.Add(1,
+            new KeyValuePair<string, object?>("from_state", fromState.ToString()),
+            new KeyValuePair<string, object?>("to_state", to.ToString()));
 
         Timeline.Add(TimelineEntry.Create(
             CaseId,

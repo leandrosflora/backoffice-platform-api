@@ -1,5 +1,6 @@
 using System.Globalization;
 using Backoffice.Application.Abstractions;
+using Backoffice.Application.Observability;
 using Backoffice.Application.Policy;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Common;
@@ -49,6 +50,7 @@ public sealed class CreateCaseHandler(ICaseRepository repository, IUnitOfWork un
 
         repository.Add(@case);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        ApplicationMetrics.CasesCreatedTotal.Add(1);
 
         return @case.ToResponse();
     }

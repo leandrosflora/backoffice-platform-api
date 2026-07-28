@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Backoffice.Application.Observability;
+
 namespace Backoffice.Application.Policy;
 
 /// <summary>
@@ -24,7 +27,20 @@ public sealed class PolicyEnforcer(IPolicyDecisionClient client)
         IReadOnlyDictionary<string, bool>? obligationResults = null,
         CancellationToken cancellationToken = default)
     {
+        using var activity = BackofficeActivitySource.Instance.StartActivity("policy.evaluate");
+        activity?.SetTag("policy.action", input.Action);
+        activity?.SetTag("tenant_id", input.Subject.TenantId);
+        activity?.SetTag("correlation_id", input.CorrelationId);
+
+        var stopwatch = Stopwatch.StartNew();
         var decision = await client.EvaluateAsync(input, cancellationToken);
+        stopwatch.Stop();
+
+        var decisionLabel = !decision.PdpAvailable ? "unavailable" : decision.Allow ? "allow" : "deny";
+        ApplicationMetrics.PolicyDecisionsTotal.Add(1,
+            new KeyValuePair<string, object?>("action", input.Action),
+            new KeyValuePair<string, object?>("decision", decisionLabel));
+        ApplicationMetrics.PolicyDecisionDurationSeconds.Record(stopwatch.Elapsed.TotalSeconds);
 
         if (!decision.PdpAvailable)
         {

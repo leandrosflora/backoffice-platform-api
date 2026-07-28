@@ -1,3 +1,5 @@
+using Backoffice.Domain.Observability;
+
 namespace Backoffice.Domain.Documents;
 
 /// <summary>
@@ -29,14 +31,22 @@ public static class DocumentClassifier
 
         if (!anySignalFound)
         {
+            RecordOutcome("abstained");
             return null;
         }
 
         if (Keywords.TryGetValue(declaredType, out var declaredKeywords) && declaredKeywords.Any(normalized.Contains))
         {
+            RecordOutcome("confirmed");
             return 0.9;
         }
 
+        RecordOutcome("low_confidence");
         return 0.3;
     }
+
+    private static void RecordOutcome(string outcome) =>
+        DomainMetrics.IntelligenceOutcomesTotal.Add(1,
+            new KeyValuePair<string, object?>("capability", "document_classification"),
+            new KeyValuePair<string, object?>("outcome", outcome));
 }

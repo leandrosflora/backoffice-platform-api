@@ -1,6 +1,7 @@
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Approvals;
 using Backoffice.Application.Cases;
+using Backoffice.Application.Observability;
 using Backoffice.Application.Policy;
 using Backoffice.Domain.Approvals;
 using Backoffice.Domain.Cases;
@@ -44,11 +45,13 @@ public sealed class RequestExecutionHandler(
         {
             if (existingRecord.CommandHash != request.CommandHash)
             {
+                RecordIdempotency("conflict");
                 throw new IdempotencyConflictException(idempotencyKey);
             }
 
             var existingExecution = await executionRepository.FindByIdAsync(tenantId, caseId, existingRecord.ExecutionId, cancellationToken)
                 ?? throw new ExecutionNotFoundException(existingRecord.ExecutionId);
+            RecordIdempotency("replay");
             return new RequestExecutionResult(existingExecution.ToResponse(), IsReplay: true);
         }
 
@@ -96,6 +99,7 @@ public sealed class RequestExecutionHandler(
             },
             cancellationToken);
 
+        RecordIdempotency("new");
         var execution = Execution.Create(caseId, tenantId, idempotencyKey, request.CommandHash, clock.UtcNow);
         executionRepository.Add(execution);
         idempotencyRepository.Add(IdempotencyRecord.Create(tenantId, caseId, idempotencyKey, request.CommandHash, execution.ExecutionId, clock.UtcNow));
@@ -119,6 +123,7 @@ public sealed class RequestExecutionHandler(
                     @case.CaseVersion, CaseState.Executed, "ExecutionCompleted", actorId, "execution",
                     correlationId, null, "Execution succeeded.", clock.UtcNow,
                     BusinessRuleReferences.ExecutionCompleted, PolicyActions.ExecutionRequest);
+                RecordExecutionResult("succeeded");
                 break;
             case ExecutionOutcome.Failed:
                 execution.MarkFailed(clock.UtcNow);
@@ -126,6 +131,7 @@ public sealed class RequestExecutionHandler(
                     @case.CaseVersion, CaseState.Failed, "ExecutionFailed", actorId, "execution",
                     correlationId, null, "Execution failed.", clock.UtcNow,
                     BusinessRuleReferences.ExecutionFailed, PolicyActions.ExecutionRequest);
+                RecordExecutionResult("failed");
                 break;
             case ExecutionOutcome.Ambiguous:
                 // Never a silent success and never auto-retried under a new key — reconciliation
@@ -135,10 +141,20 @@ public sealed class RequestExecutionHandler(
                     @case.CaseVersion, CaseState.ReconciliationRequired, "ReconciliationRequired", actorId, "execution",
                     correlationId, null, "Execution result was ambiguous; reconciliation required.", clock.UtcNow,
                     BusinessRuleReferences.ReconciliationRequired, PolicyActions.ExecutionRequest);
+                RecordExecutionResult("ambiguous");
+                ApplicationMetrics.ReconciliationsTotal.Add(1);
                 break;
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return new RequestExecutionResult(execution.ToResponse(), IsReplay: false);
     }
+
+    private static void RecordExecutionResult(string result) =>
+        ApplicationMetrics.ExecutionsTotal.Add(1, new KeyValuePair<string, object?>("result", result));
+
+    private static void RecordIdempotency(string result) =>
+        ApplicationMetrics.IdempotencyTotal.Add(1,
+            new KeyValuePair<string, object?>("action", PolicyActions.ExecutionRequest),
+            new KeyValuePair<string, object?>("result", result));
 }

@@ -5,9 +5,11 @@ using Backoffice.Api.Cases;
 using Backoffice.Api.Documents;
 using Backoffice.Api.Executions;
 using Backoffice.Api.Investigations;
+using Backoffice.Api.Observability;
 using Backoffice.Api.Operations;
 using Backoffice.Api.Recommendations;
 using Backoffice.Infrastructure;
+using Backoffice.Infrastructure.Observability;
 using Microsoft.AspNetCore.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -31,9 +33,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
         new JsonStringEnumConverter(ScreamingSnakeCaseNamingPolicy.Instance));
 });
 
+builder.Services.AddObservability(builder.Configuration, serviceName: "backoffice-api", isHttpHost: true);
+builder.Services.AddEventingGauges();
+
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseMiddleware<HttpMetricsMiddleware>();
+app.MapPrometheusScrapingEndpoint();
+app.Services.GetRequiredService<EventingGaugeRegistrar>(); // eagerly registers the outbox/dead-letter/timer gauges
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 

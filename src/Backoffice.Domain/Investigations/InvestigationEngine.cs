@@ -1,3 +1,5 @@
+using Backoffice.Domain.Observability;
+
 namespace Backoffice.Domain.Investigations;
 
 /// <summary>
@@ -12,9 +14,16 @@ public static class InvestigationEngine
     {
         if (evidenceReferences.Count == 0)
         {
+            RecordOutcome("missing_data");
             return [new Finding(FindingKind.MissingData, "insufficient-evidence", [])];
         }
 
+        RecordOutcome("confirmed_fact");
         return [new Finding(FindingKind.ConfirmedFact, "transaction-confirmed", evidenceReferences)];
     }
+
+    private static void RecordOutcome(string outcome) =>
+        DomainMetrics.IntelligenceOutcomesTotal.Add(1,
+            new KeyValuePair<string, object?>("capability", "investigation"),
+            new KeyValuePair<string, object?>("outcome", outcome));
 }

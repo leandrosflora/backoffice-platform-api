@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Eventing;
+using Backoffice.Application.Observability;
 using Backoffice.Domain.Eventing;
 
 namespace Backoffice.Workers;
@@ -57,6 +58,10 @@ public sealed class TimerFiringWorker(
 
         foreach (var timer in claimed)
         {
+            using var activity = BackofficeActivitySource.Instance.StartActivity("timer.fire");
+            activity?.SetTag("case_id", timer.AggregateId);
+            activity?.SetTag("tenant_id", timer.TenantId);
+
             try
             {
                 timer.MarkFired(clock.UtcNow);

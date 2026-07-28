@@ -3,6 +3,7 @@ using Backoffice.Application.Abstractions;
 using Backoffice.Application.Audit;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Eventing;
+using Backoffice.Application.Observability;
 using Backoffice.Domain.Audit;
 using Backoffice.Domain.Eventing;
 using Backoffice.Infrastructure.Eventing;
@@ -90,6 +91,11 @@ public sealed class WorkflowConsumerWorker(
             await parseFailureScope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(cancellationToken);
             return;
         }
+
+        using var activity = BackofficeActivitySource.Instance.StartActivity("workflow.process");
+        activity?.SetTag("case_id", envelope.CaseId);
+        activity?.SetTag("tenant_id", envelope.TenantId);
+        activity?.SetTag("correlation_id", envelope.CorrelationId);
 
         using var scope = scopeFactory.CreateScope();
         var inboxRepository = scope.ServiceProvider.GetRequiredService<IInboxRepository>();

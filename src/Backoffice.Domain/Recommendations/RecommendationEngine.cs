@@ -1,4 +1,5 @@
 using Backoffice.Domain.Investigations;
+using Backoffice.Domain.Observability;
 
 namespace Backoffice.Domain.Recommendations;
 
@@ -17,6 +18,10 @@ public static class RecommendationEngine
     public static RecommendationDecision Decide(IReadOnlyList<Finding> findings, IReadOnlyList<Guid> evidenceReferences)
     {
         var isGrounded = evidenceReferences.Count > 0 && findings.Any(f => f.Kind == FindingKind.ConfirmedFact);
+
+        DomainMetrics.IntelligenceOutcomesTotal.Add(1,
+            new KeyValuePair<string, object?>("capability", "recommendation"),
+            new KeyValuePair<string, object?>("outcome", isGrounded ? "approve" : "abstain"));
 
         return isGrounded
             ? new RecommendationDecision(
