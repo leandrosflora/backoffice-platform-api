@@ -12,19 +12,22 @@ public sealed class OutboxRepository(BackofficeDbContext dbContext) : IOutboxRep
     public async Task<IReadOnlyList<OutboxMessage>> ClaimAsync(
         int limit, TimeSpan staleness, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        var staleInFlight = await dbContext.Outbox
-            .Where(m => m.Status == OutboxStatus.InFlight)
-            .ToListAsync(cancellationToken);
-        foreach (var message in staleInFlight)
+        // Fetched and filtered client-side: the SQLite provider (test/dev) cannot translate
+        // a compound predicate (status membership + date comparison) over the
+        // string-converted Status enum, and the outbox table is expected to stay small at
+        // this baseline's single-node scale (topology.yaml).
+        var all = await dbContext.Outbox.ToListAsync(cancellationToken);
+
+        foreach (var message in all.Where(m => m.Status == OutboxStatus.InFlight))
         {
             message.ReclaimIfStale(staleness, now);
         }
 
-        var candidates = await dbContext.Outbox
+        var candidates = all
             .Where(m => (m.Status == OutboxStatus.Pending || m.Status == OutboxStatus.Retry) && m.AvailableAt <= now)
             .OrderBy(m => m.Id)
             .Take(limit)
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         foreach (var message in candidates)
         {
@@ -59,19 +62,19 @@ public sealed class TimerRepository(BackofficeDbContext dbContext) : ITimerRepos
     public async Task<IReadOnlyList<EventTimer>> ClaimDueAsync(
         int limit, TimeSpan staleness, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        var staleInFlight = await dbContext.Timers
-            .Where(t => t.Status == TimerStatus.InFlight)
-            .ToListAsync(cancellationToken);
-        foreach (var timer in staleInFlight)
+        // See OutboxRepository.ClaimAsync for why this is filtered client-side.
+        var all = await dbContext.Timers.ToListAsync(cancellationToken);
+
+        foreach (var timer in all.Where(t => t.Status == TimerStatus.InFlight))
         {
             timer.ReclaimIfStale(staleness, now);
         }
 
-        var candidates = await dbContext.Timers
+        var candidates = all
             .Where(t => (t.Status == TimerStatus.Scheduled || t.Status == TimerStatus.Retry) && t.DueAt <= now)
             .OrderBy(t => t.DueAt)
             .Take(limit)
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         foreach (var timer in candidates)
         {

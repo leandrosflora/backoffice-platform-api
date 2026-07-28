@@ -67,8 +67,25 @@ public sealed class WorkflowConsumerWorker(
     internal async Task ProcessMessageAsync(
         string rawEnvelope, IProducer<string, string> dlqProducer, KafkaSettings config, CancellationToken cancellationToken)
     {
-        var envelope = JsonSerializer.Deserialize<EventEnvelope>(rawEnvelope)
-            ?? throw new InvalidOperationException("Envelope deserialized to null.");
+        EventEnvelope envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize<EventEnvelope>(rawEnvelope)
+                ?? throw new InvalidOperationException("Envelope deserialized to null.");
+        }
+        catch (Exception exception)
+        {
+            // A malformed payload is never retryable and carries no reliable tenant/case id
+            // to key off — dead-letter it directly rather than letting deserialization
+            // failure escape uncaught and take down the whole consumer loop.
+            logger.LogError(exception, "Unparseable event envelope on {Topic}; dead-lettering raw payload", config.EventsTopic);
+            using var parseFailureScope = scopeFactory.CreateScope();
+            parseFailureScope.ServiceProvider.GetRequiredService<IDeadLetterRepository>().Add(DeadLetter.Create(
+                "consumer", config.EventsTopic, Guid.NewGuid(), "unknown", Guid.Empty, "Unparseable",
+                rawEnvelope, exception.Message, 1, clock.UtcNow));
+            await parseFailureScope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(cancellationToken);
+            return;
+        }
 
         using var scope = scopeFactory.CreateScope();
         var inboxRepository = scope.ServiceProvider.GetRequiredService<IInboxRepository>();
