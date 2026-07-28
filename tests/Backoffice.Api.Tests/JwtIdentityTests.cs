@@ -73,20 +73,13 @@ public class JwtIdentityTests(BackofficeApiFactory factory) : IClassFixture<Back
             keys.PrivateKeyPath, Issuer, Audience, subject: "approver-1", subjectType: "HUMAN",
             tenantId: "tenant-jwt-ok", roles: ["case-manager"], purpose: "CASE_MANAGEMENT");
 
-        // DIAGNOSTIC: call the validator directly first to surface the real failure reason.
-        var directOptions = Microsoft.Extensions.Options.Options.Create(new IdentityOptions
-        {
-            Mode = "jwt", PublicKeyPath = keys.PublicKeyPath, Issuer = Issuer, Audience = Audience, MaxTtlSeconds = 300,
-        });
-        try
-        {
-            var resolved = new JwtIdentityValidator(directOptions).Validate(token);
-            throw new Exception($"DIRECT VALIDATION SUCCEEDED: {resolved}");
-        }
-        catch (Backoffice.Application.Identity.JwtValidationException ex)
-        {
-            throw new Exception($"DIRECT VALIDATION FAILED: reason={ex.Reason} inner={ex.InnerException}");
-        }
+        var client = CreateAuthorizedClient(jwtFactory, token);
+        var response = await CreateCaseAsync(client);
+        var rawBody = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected Created, got {response.StatusCode}: {rawBody}");
+
+        var body = JsonSerializer.Deserialize<CaseResponse>(rawBody, JsonOptions);
+        Assert.Equal("tenant-jwt-ok", body!.TenantId);
     }
 
     [Fact]

@@ -19,6 +19,7 @@ public sealed class EdDsaSecurityKey : AsymmetricSecurityKey
     {
         PublicKey = publicKey;
         CryptoProviderFactory = new EdDsaCryptoProviderFactory();
+        KeyId = ComputeKeyId(publicKey);
     }
 
     public EdDsaSecurityKey(Key privateKey)
@@ -26,7 +27,16 @@ public sealed class EdDsaSecurityKey : AsymmetricSecurityKey
         PrivateKey = privateKey;
         PublicKey = privateKey.PublicKey;
         CryptoProviderFactory = new EdDsaCryptoProviderFactory();
+        KeyId = ComputeKeyId(PublicKey);
     }
+
+    // Some Microsoft.IdentityModel.Tokens key-resolution paths behave differently when
+    // every candidate key has an empty KeyId — deriving one deterministically from the
+    // public key bytes means the signing-side and verifying-side EdDsaSecurityKey
+    // instances (constructed separately, from the private key and from the public key PEM
+    // respectively) always agree on it, since both resolve to the same underlying key.
+    private static string ComputeKeyId(PublicKey publicKey) =>
+        Convert.ToHexString(publicKey.Export(KeyBlobFormat.RawPublicKey))[..16];
 
     public override int KeySize => 256;
 

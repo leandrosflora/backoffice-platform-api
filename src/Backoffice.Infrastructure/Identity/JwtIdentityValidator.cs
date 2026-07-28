@@ -43,6 +43,12 @@ public sealed class JwtIdentityValidator : IJwtIdentityValidator
             RequireExpirationTime = true,
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero,
+            // TokenValidationParameters has its own CryptoProviderFactory (defaulting to the
+            // global CryptoProviderFactory.Default, which knows nothing about "EdDSA") that
+            // otherwise takes precedence over the signing key's own factory during
+            // signature verification — without this, verification silently uses the wrong
+            // factory and every token, valid or not, fails signature validation.
+            CryptoProviderFactory = _signingKey.CryptoProviderFactory,
         };
 
         TokenValidationResult result;

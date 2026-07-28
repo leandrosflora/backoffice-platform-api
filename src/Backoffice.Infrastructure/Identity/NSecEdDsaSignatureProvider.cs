@@ -41,6 +41,15 @@ public sealed class NSecEdDsaSignatureProvider(EdDsaSecurityKey key, string algo
 
     public override bool Verify(byte[] input, byte[] signature) => Ed25519Algorithm.Verify(key.PublicKey, input, signature);
 
+    // JsonWebTokenHandler calls this offset/length overload directly rather than the plain
+    // byte[]-based Verify above (whose base implementation throws NotImplementedException),
+    // so it must be implemented too — mirroring the span-based Sign override situation.
+    public override bool Verify(byte[] input, int inputOffset, int inputLength, byte[] signature, int signatureOffset, int signatureLength) =>
+        Ed25519Algorithm.Verify(
+            key.PublicKey,
+            input.AsSpan(inputOffset, inputLength),
+            signature.AsSpan(signatureOffset, signatureLength));
+
     protected override void Dispose(bool disposing)
     {
     }
