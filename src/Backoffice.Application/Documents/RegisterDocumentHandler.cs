@@ -1,0 +1,86 @@
+using Backoffice.Application.Abstractions;
+using Backoffice.Application.Cases;
+using Backoffice.Domain.Cases;
+using Backoffice.Domain.Documents;
+using Backoffice.Domain.Evidence;
+
+namespace Backoffice.Application.Documents;
+
+public sealed class RegisterDocumentHandler(
+    ICaseRepository caseRepository,
+    IDocumentRepository documentRepository,
+    IEvidenceRepository evidenceRepository,
+    IMalwareScanAdapter malwareScanAdapter,
+    IUnitOfWork unitOfWork,
+    IClock clock)
+{
+    public async Task<DocumentResponse> HandleAsync(
+        string tenantId,
+        Guid caseId,
+        long expectedVersion,
+        RegisterDocumentRequest request,
+        string actorId,
+        Guid correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var @case = await caseRepository.FindByIdAsync(tenantId, caseId, cancellationToken)
+            ?? throw new CaseNotFoundException(caseId);
+
+        if (expectedVersion != @case.CaseVersion)
+        {
+            throw new CaseVersionConflictException(expectedVersion, @case.CaseVersion);
+        }
+
+        var document = Document.Register(
+            caseId, tenantId, request.DocumentType, request.MediaType, request.Checksum, request.StorageReference, clock.UtcNow);
+        documentRepository.Add(document);
+
+        // Intake acceptance transitions the case regardless of the eventual scan/validation
+        // outcome (spec: document-intelligence, "Document validation transitions the case").
+        if (@case.State == CaseState.Created)
+        {
+            @case.Transition(
+                @case.CaseVersion, CaseState.DocumentsReceived, "DocumentReceived", actorId, "document-intake",
+                correlationId, null, "First document registered for the case.", clock.UtcNow);
+        }
+
+        var scanResult = await malwareScanAdapter.ScanAsync(document, cancellationToken);
+        if (!scanResult.IsClean)
+        {
+            document.Reject([scanResult.Reason ?? "Malware scan flagged the document."]);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return document.ToResponse();
+        }
+
+        document.ClearQuarantine();
+
+        var classificationScore = DocumentClassifier.TryScoreAgainstDeclaredType(request.StorageReference, request.DocumentType);
+        if (classificationScore.HasValue)
+        {
+            evidenceRepository.Add(EvidenceRecord.Create(
+                caseId, tenantId, EvidenceType.ExtractedField, EvidenceSourceType.Document,
+                document.DocumentId.ToString(), document.Version.ToString(), classificationScore.Value,
+                value: request.DocumentType.ToString(), checksum: document.Checksum, now: clock.UtcNow));
+        }
+
+        document.MarkValidated();
+
+        if (@case.State == CaseState.DocumentsReceived)
+        {
+            var validatedTypes = (await documentRepository.ListByCaseAsync(tenantId, caseId, cancellationToken))
+                .Where(d => d.Status == DocumentStatus.Validated)
+                .Select(d => d.DocumentType)
+                .Append(document.DocumentType);
+
+            if (DocumentRequirements.AreRequirementsSatisfied(@case.DisputeType, validatedTypes))
+            {
+                @case.Transition(
+                    @case.CaseVersion, CaseState.DocumentsValidated, "DocumentValidated", actorId, "document-intake",
+                    correlationId, null, "Required documents validated.", clock.UtcNow);
+            }
+        }
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return document.ToResponse();
+    }
+}
