@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Needed for WebApplication/Kestrel (the process's sole liveness-probe endpoint) even
+         though this stays a Worker SDK project, not a Web SDK one. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.17" />
   </ItemGroup>

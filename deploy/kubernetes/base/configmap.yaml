@@ -1,0 +1,20 @@
+# Non-secret configuration only — ConnectionStrings__Backoffice (embeds the Postgres
+# password) is expected from a separately provisioned "intelligent-backoffice-runtime"
+# Secret, referenced by deployment.yaml's secretRef (matching how the reference
+# deploy/kubernetes/base/configmap.yaml keeps its own DB credential out of the ConfigMap).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: intelligent-backoffice-config
+  namespace: intelligent-backoffice
+data:
+  Opa__BaseUrl: http://opa.platform.svc.cluster.local:8181
+  Identity__Mode: jwt
+  Identity__Issuer: https://identity.corporate.example
+  Identity__Audience: intelligent-backoffice-api
+  Identity__MaxTtlSeconds: "300"
+  Identity__PublicKeyPath: /run/identity/identity-public.pem
+  Kafka__BootstrapServers: kafka.platform.svc.cluster.local:9093
+  Kafka__EventsTopic: backoffice.events.v1
+  Kafka__DlqTopic: backoffice.dlq.v1
+  Kafka__ConsumerGroup: backoffice-workflow-v1

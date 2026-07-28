@@ -1,3 +1,6 @@
+# Assumes intelligent-backoffice-platform-architecture is checked out as a sibling directory
+# (matching .github/workflows/ci.yml) — policies/, observability/, and dev identity material
+# are read from there rather than duplicated here.
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,5 +19,243 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- OPA/Redpanda/Prometheus/Grafana/Jaeger/OTel-Collector: same image, command, and
+  # healthcheck as intelligent-backoffice-platform-architecture/docker-compose.yml, only the
+  # bind-mount source paths are adjusted to point at the sibling repo (spec:
+  # platform-deployment, "Docker-compose profiles matching existing naming"). ---
+
+  opa:
+    image: openpolicyagent/opa:1.18.2-static
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    volumes:
+      - ../intelligent-backoffice-platform-architecture/policies:/policies:ro
+    ports:
+      - "${OPA_PORT:-8181}:8181"
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    profiles: [runtime, observability, distributed, secure]
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=info
+    ports:
+      - "${REDPANDA_PORT:-19092}:19092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info", "-X", "brokers=localhost:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    profiles: [distributed]
+
+  redpanda-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        rpk topic create backoffice.events.v1 --partitions 3 --replicas 1 -X brokers=redpanda:9092 || true;
+        rpk topic create backoffice.dlq.v1 --partitions 1 --replicas 1 -X brokers=redpanda:9092 || true;
+        rpk topic list -X brokers=redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    profiles: [distributed]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.68.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_PORT:-16686}:16686"
+    profiles: [observability]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.131.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ../intelligent-backoffice-platform-architecture/observability/otel/collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${OTLP_GRPC_PORT:-4317}:4317"
+      - "${OTLP_HTTP_PORT:-4318}:4318"
+      - "${OTEL_HEALTH_PORT:-13133}:13133"
+    depends_on:
+      - jaeger
+    profiles: [observability]
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ../intelligent-backoffice-platform-architecture/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../intelligent-backoffice-platform-architecture/observability/prometheus/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
+      - ../intelligent-backoffice-platform-architecture/observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      vertical-slice:
+        condition: service_healthy
+    profiles: [observability]
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../intelligent-backoffice-platform-architecture/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../intelligent-backoffice-platform-architecture/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+      - jaeger
+    profiles: [observability]
+
+  # --- .NET deployables ---
+
+  # Named "vertical-slice" (not "api") so it satisfies observability/prometheus/prometheus.yml's
+  # existing, unmodified `targets: ["vertical-slice:8080"]` scrape config without editing it.
+  vertical-slice:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Api/Dockerfile
+    environment: &api-environment
+      ConnectionStrings__Backoffice: Host=postgres;Port=5432;Database=backoffice;Username=backoffice;Password=backoffice
+      Opa__BaseUrl: http://opa:8181
+      Otel__Endpoint: http://otel-collector:4317
+      Identity__Mode: headers
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    profiles: [runtime, observability]
+
+  secure-api:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Api/Dockerfile
+    environment:
+      <<: *api-environment
+      Identity__Mode: jwt
+      Identity__PublicKeyPath: /run/identity/identity-public.pem
+      Identity__Issuer: https://identity.local
+      Identity__Audience: intelligent-backoffice-api
+      Identity__MaxTtlSeconds: "300"
+    volumes:
+      - ./.local/security/identity-public.pem:/run/identity/identity-public.pem:ro
+    ports:
+      - "${SECURE_APP_PORT:-8082}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    profiles: [secure]
+
+  distributed-api:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Api/Dockerfile
+    environment: *api-environment
+    ports:
+      - "${DISTRIBUTED_APP_PORT:-8081}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    profiles: [distributed]
+
+  outbox-dispatcher:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Workers/Dockerfile
+    environment: &worker-environment
+      ConnectionStrings__Backoffice: Host=postgres;Port=5432;Database=backoffice;Username=backoffice;Password=backoffice
+      Opa__BaseUrl: http://opa:8181
+      Kafka__BootstrapServers: redpanda:9092
+      Kafka__EventsTopic: backoffice.events.v1
+      Kafka__DlqTopic: backoffice.dlq.v1
+      Kafka__ConsumerGroup: backoffice-workflow-v1
+      Worker__Role: outbox-dispatcher
+    depends_on:
+      distributed-api:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    profiles: [distributed]
+
+  workflow-worker:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Workers/Dockerfile
+    environment:
+      <<: *worker-environment
+      Worker__Role: workflow-consumer
+    depends_on:
+      distributed-api:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    profiles: [distributed]
+
+  timer-worker:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Workers/Dockerfile
+    environment:
+      <<: *worker-environment
+      Worker__Role: timer-firing
+    depends_on:
+      distributed-api:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    profiles: [distributed]
+
 volumes:
   backoffice-postgres-data:
+  prometheus-data:
+  grafana-data:

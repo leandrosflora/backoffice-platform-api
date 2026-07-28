@@ -13,7 +13,9 @@ using Backoffice.Application.Identity;
 using Backoffice.Infrastructure;
 using Backoffice.Infrastructure.Identity;
 using Backoffice.Infrastructure.Observability;
+using Backoffice.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,6 +52,14 @@ builder.Services.AddScoped<ICallerIdentityAccessor, HttpContextCallerIdentityAcc
 
 var app = builder.Build();
 
+// Test hosts provision their SQLite in-memory schema via EnsureCreated() instead (see
+// BackofficeApiFactory) — Migrate() only applies to the real Npgsql-backed deployment.
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    using var migrationScope = app.Services.CreateScope();
+    migrationScope.ServiceProvider.GetRequiredService<BackofficeDbContext>().Database.Migrate();
+}
+
 app.UseExceptionHandler();
 app.UseMiddleware<JwtIdentityMiddleware>();
 app.UseMiddleware<HttpMetricsMiddleware>();
@@ -57,6 +67,11 @@ app.MapPrometheusScrapingEndpoint();
 app.Services.GetRequiredService<EventingGaugeRegistrar>(); // eagerly registers the outbox/dead-letter/timer gauges
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// Liveness (/health) only proves the process is up; readiness additionally proves the
+// database is reachable, matching the Kubernetes probe split in deploy/kubernetes/base
+// (spec: platform-deployment) — a pod that can't reach Postgres yet shouldn't receive traffic.
+app.MapGet("/health/ready", async (BackofficeDbContext db) =>
+    await db.Database.CanConnectAsync() ? Results.Ok(new { status = "ready" }) : Results.StatusCode(503));
 
 app.MapCasesEndpoints();
 app.MapDocumentsEndpoints();

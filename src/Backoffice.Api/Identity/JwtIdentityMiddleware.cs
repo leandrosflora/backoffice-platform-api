@@ -16,7 +16,14 @@ public sealed class JwtIdentityMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext context, IOptions<IdentityOptions> identityOptions)
     {
-        if (identityOptions.Value.Mode != "jwt")
+        // Health/readiness probes (Kubernetes, docker-compose healthchecks) and the Prometheus
+        // scrape endpoint never carry a bearer token, matching the reference implementation
+        // (both are registered outside its per-route auth dependency) — otherwise a
+        // secure-profile pod could never become Ready/scraped and would be killed by its own
+        // liveness probe.
+        if (identityOptions.Value.Mode != "jwt"
+            || context.Request.Path.StartsWithSegments("/health")
+            || context.Request.Path.StartsWithSegments("/metrics"))
         {
             await next(context);
             return;
