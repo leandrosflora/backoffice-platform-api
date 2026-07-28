@@ -1,0 +1,137 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: intelligent-backoffice-api
+  namespace: intelligent-backoffice
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-system
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+      ports:
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8181
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Workers never serve inbound traffic (no Ingress rule => default-deny ingress); they only need
+# the same egress as the Api to Kafka/Postgres/OPA plus DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: intelligent-backoffice-outbox-dispatcher
+  namespace: intelligent-backoffice
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-outbox-dispatcher
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+      ports:
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8181
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: intelligent-backoffice-workflow-worker
+  namespace: intelligent-backoffice
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-workflow-worker
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+      ports:
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8181
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: intelligent-backoffice-timer-worker
+  namespace: intelligent-backoffice
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-timer-worker
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+      ports:
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8181
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

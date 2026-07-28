@@ -1,0 +1,43 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: intelligent-backoffice-api
+  namespace: intelligent-backoffice
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: intelligent-backoffice-outbox-dispatcher
+  namespace: intelligent-backoffice
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-outbox-dispatcher
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: intelligent-backoffice-workflow-worker
+  namespace: intelligent-backoffice
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-workflow-worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: intelligent-backoffice-timer-worker
+  namespace: intelligent-backoffice
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-timer-worker

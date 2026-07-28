@@ -33,6 +33,14 @@ public sealed class WorkflowConsumerWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // BackgroundService.StartAsync calls ExecuteAsync directly (not via Task.Run), so
+        // everything before the first await runs synchronously on the Generic Host's startup
+        // thread. Confluent.Kafka's Consume(TimeSpan) below is a genuinely blocking call with
+        // no async overload — without this yield, it would block that startup thread (up to
+        // the poll timeout, repeatedly, for as long as no message arrives) and every other
+        // hosted service registered after this one — including Kestrel — would never start.
+        await Task.Yield();
+
         var config = settings.Value;
         using var consumer = kafkaClientFactory.CreateConsumer(config.ConsumerGroup, "backoffice-workflow-worker");
         using var dlqProducer = kafkaClientFactory.CreateProducer("backoffice-dlq-publisher");

@@ -1,0 +1,14 @@
+# Workers have no Service: they never receive inbound traffic (spec: platform-deployment).
+apiVersion: v1
+kind: Service
+metadata:
+  name: intelligent-backoffice-api
+  namespace: intelligent-backoffice
+spec:
+  selector:
+    app.kubernetes.io/name: intelligent-backoffice-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP
