@@ -68,7 +68,8 @@ public sealed class ResolveReconciliationHandler(
         {
             @case.Transition(
                 @case.CaseVersion, toState.Value, "ReconciliationResolved", actorId, "reconciliation",
-                correlationId, null, request.Reason, clock.UtcNow);
+                correlationId, null, request.Reason, clock.UtcNow,
+                BusinessRuleReferences.ReconciliationRequired, PolicyActions.ReconciliationResolve);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);

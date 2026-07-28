@@ -98,7 +98,9 @@ public sealed class Case
         Guid correlationId,
         Guid? causationId,
         string reason,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        IReadOnlyList<string>? ruleReferences = null,
+        string? policyAction = null)
     {
         if (expectedVersion != CaseVersion)
         {
@@ -123,7 +125,9 @@ public sealed class Case
             correlationId,
             causationId,
             reason,
-            now));
+            now,
+            ruleReferences,
+            policyAction));
     }
 
     public void RecordRecommendation(long recommendationVersion, string recommendationActorId)

@@ -28,8 +28,9 @@ public class GovernedExecutionTests(BackofficeApiFactory factory) : IClassFixtur
         client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, tenantId);
         client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, actorId);
         // Covers case.create/document.register (case-manager, operations-analyst),
-        // approval.decide/case.read (approver), and reconciliation.resolve (reconciler).
-        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,operations-analyst,approver,reconciler");
+        // approval.decide/case.read (approver), reconciliation.resolve (reconciler), and
+        // the timeline/audit.read endpoint (auditor).
+        client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,operations-analyst,approver,reconciler,auditor");
         return client;
     }
 
@@ -129,6 +130,28 @@ public class GovernedExecutionTests(BackofficeApiFactory factory) : IClassFixtur
 
         var caseAfter = await (await approverClient.GetAsync($"/v1/cases/{@case.CaseId}")).Content.ReadFromJsonAsync<CaseResponse>(JsonOptions);
         Assert.Equal(CaseState.Executed, caseAfter!.State);
+
+        // spec: audit-compliance, "Decision record cites its governing rule" — every
+        // recommendation/approval/execution decision's timeline entry carries the BR-###
+        // rule id(s) and policy action that governed it.
+        var timeline = await (await approverClient.GetAsync($"/v1/cases/{@case.CaseId}/timeline")).Content
+            .ReadFromJsonAsync<List<TimelineEntryResponse>>(JsonOptions);
+
+        var decisionProposed = timeline!.Single(t => t.EventType == "DecisionProposed");
+        Assert.NotEmpty(decisionProposed.RuleReferences);
+        Assert.Equal("recommendation.create", decisionProposed.PolicyAction);
+
+        var decisionApproved = timeline.Single(t => t.EventType == "DecisionApproved");
+        Assert.Equal(["BR-012", "BR-013", "BR-014", "BR-015"], decisionApproved.RuleReferences);
+        Assert.Equal("approval.decide", decisionApproved.PolicyAction);
+
+        var executionRequested = timeline.Single(t => t.EventType == "ExecutionRequested");
+        Assert.Equal(["BR-016", "BR-017", "BR-018", "BR-019"], executionRequested.RuleReferences);
+        Assert.Equal("execution.request", executionRequested.PolicyAction);
+
+        var executionCompleted = timeline.Single(t => t.EventType == "ExecutionCompleted");
+        Assert.Equal(["BR-018", "BR-021"], executionCompleted.RuleReferences);
+        Assert.Equal("execution.request", executionCompleted.PolicyAction);
     }
 
     [Fact]

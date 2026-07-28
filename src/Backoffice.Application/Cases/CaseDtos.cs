@@ -34,7 +34,9 @@ public sealed record TimelineEntryResponse(
     Guid CorrelationId,
     Guid? CausationId,
     string Reason,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    IReadOnlyList<string> RuleReferences,
+    string? PolicyAction);
 
 public static class CaseMapping
 {
@@ -60,5 +62,7 @@ public static class CaseMapping
         entry.CorrelationId,
         entry.CausationId,
         entry.Reason,
-        entry.OccurredAt);
+        entry.OccurredAt,
+        entry.RuleReferences,
+        entry.PolicyAction);
 }

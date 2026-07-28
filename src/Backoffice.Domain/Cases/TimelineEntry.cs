@@ -17,6 +17,18 @@ public sealed class TimelineEntry
     public string Reason { get; private init; } = string.Empty;
     public DateTimeOffset OccurredAt { get; private init; }
 
+    /// <summary>
+    /// `BR-###` rule id(s) that governed this transition, when it's a recommendation,
+    /// approval, or execution decision (spec: audit-compliance, "Traceability to business
+    /// rules"). Empty for transitions the traceability matrix doesn't cite (e.g. document
+    /// intake, case cancellation).
+    /// </summary>
+    public IReadOnlyList<string> RuleReferences { get; private init; } = [];
+
+    /// <summary>The OPA policy action (e.g. "recommendation.create") that authorized this
+    /// transition, or null when the transition isn't itself a gated decision.</summary>
+    public string? PolicyAction { get; private init; }
+
     private TimelineEntry() { }
 
     public static TimelineEntry Create(
@@ -28,7 +40,9 @@ public sealed class TimelineEntry
         Guid correlationId,
         Guid? causationId,
         string reason,
-        DateTimeOffset occurredAt) => new()
+        DateTimeOffset occurredAt,
+        IReadOnlyList<string>? ruleReferences = null,
+        string? policyAction = null) => new()
     {
         Id = Guid.NewGuid(),
         CaseId = caseId,
@@ -40,5 +54,7 @@ public sealed class TimelineEntry
         CausationId = causationId,
         Reason = reason,
         OccurredAt = occurredAt,
+        RuleReferences = ruleReferences ?? [],
+        PolicyAction = policyAction,
     };
 }

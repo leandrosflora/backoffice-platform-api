@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Backoffice.Application.Abstractions;
+using Backoffice.Application.Audit;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Eventing;
 using Backoffice.Domain.Cases;
@@ -253,6 +254,70 @@ public class EventingTests(WorkersTestFixture fixture) : IClassFixture<WorkersTe
         {
             var caseAfter = await scope.ServiceProvider.GetRequiredService<ICaseRepository>().FindByIdAsync("tenant-dedup", @case.CaseId, CancellationToken.None);
             Assert.Equal(CaseState.AwaitingDocuments, caseAfter!.State);
+        }
+    }
+
+    [Fact]
+    public async Task WorkflowConsumer_ProcessedEvent_IsIngestedIntoAuditStoreWithRuleReferences()
+    {
+        await using var testServices = await TestServices.CreateAsync(fixture.KafkaBootstrapServers);
+
+        KafkaSettings settings;
+        IKafkaClientFactory kafkaFactory;
+        using (var scope = testServices.ScopeFactory.CreateScope())
+        {
+            settings = scope.ServiceProvider.GetRequiredService<IOptions<KafkaSettings>>().Value;
+            kafkaFactory = scope.ServiceProvider.GetRequiredService<IKafkaClientFactory>();
+        }
+
+        // Shaped like the payload BackofficeDbContext's outbox hook actually generates for a
+        // DecisionApproved timeline entry (spec: audit-compliance, "Decision record cites
+        // its governing rule").
+        var eventId = Guid.NewGuid();
+        var caseId = Guid.NewGuid();
+        var occurredAt = testServices.Clock.UtcNow;
+        var envelopeJson = JsonSerializer.Serialize(new
+        {
+            eventId,
+            eventType = "DecisionApproved",
+            eventVersion = 1,
+            occurredAt,
+            tenantId = "tenant-audit-ingest",
+            caseId,
+            correlationId = Guid.NewGuid(),
+            causationId = (Guid?)null,
+            producer = "intelligent-backoffice-dotnet",
+            dataClassification = "INTERNAL",
+            replayCount = 0,
+            replayOf = (Guid?)null,
+            payload = new
+            {
+                caseId,
+                caseVersion = 5,
+                eventType = "DecisionApproved",
+                actorId = "approver-1",
+                origin = "approval",
+                reason = "approved within authority limit",
+                occurredAt,
+                ruleReferences = new[] { "BR-012", "BR-013", "BR-014", "BR-015" },
+                policyAction = "approval.decide",
+            },
+        });
+
+        var worker = new WorkflowConsumerWorker(
+            testServices.ScopeFactory, kafkaFactory, Microsoft.Extensions.Options.Options.Create(settings), testServices.Clock, NullLogger<WorkflowConsumerWorker>.Instance);
+        using var dlqProducer = kafkaFactory.CreateProducer("test-dlq-producer-audit");
+        await worker.ProcessMessageAsync(envelopeJson, dlqProducer, settings, CancellationToken.None);
+
+        using (var scope = testServices.ScopeFactory.CreateScope())
+        {
+            var records = await scope.ServiceProvider.GetRequiredService<IAuditRepository>().ListByTenantAsync("tenant-audit-ingest", 10);
+            var record = Assert.Single(records);
+            Assert.Equal(eventId, record.EventId);
+            Assert.Equal("DecisionApproved", record.EventType);
+            Assert.Equal(caseId, record.AggregateId);
+            Assert.Equal("approval.decide", record.PolicyAction);
+            Assert.Equal(["BR-012", "BR-013", "BR-014", "BR-015"], record.RuleReferences);
         }
     }
 

@@ -86,15 +86,18 @@ public sealed class DecideApprovalHandler(
             actorId, request.Reason, clock.UtcNow, Case.ApprovalWindow);
         approvalRepository.Add(approval);
 
-        var (toState, eventType) = status switch
+        var (toState, eventType, ruleReferences) = status switch
         {
-            ApprovalStatus.Approved => (CaseState.Approved, "DecisionApproved"),
-            ApprovalStatus.Rejected => (CaseState.Rejected, "DecisionRejected"),
-            ApprovalStatus.MoreEvidenceRequired => (CaseState.MoreEvidenceRequired, "MoreEvidenceRequired"),
+            ApprovalStatus.Approved => (CaseState.Approved, "DecisionApproved", BusinessRuleReferences.DecisionApproved),
+            ApprovalStatus.Rejected => (CaseState.Rejected, "DecisionRejected", BusinessRuleReferences.DecisionRejected),
+            // Not a documented event in contracts/asyncapi/platform-events.yaml, so no BR-### to cite.
+            ApprovalStatus.MoreEvidenceRequired => (CaseState.MoreEvidenceRequired, "MoreEvidenceRequired", (IReadOnlyList<string>)[]),
             _ => throw new ArgumentOutOfRangeException(),
         };
 
-        @case.Transition(@case.CaseVersion, toState, eventType, actorId, "approval", correlationId, null, request.Reason, clock.UtcNow);
+        @case.Transition(
+            @case.CaseVersion, toState, eventType, actorId, "approval", correlationId, null, request.Reason, clock.UtcNow,
+            ruleReferences, PolicyActions.ApprovalDecide);
         @case.ClearApprovalDeadline();
 
         if (status == ApprovalStatus.Approved)

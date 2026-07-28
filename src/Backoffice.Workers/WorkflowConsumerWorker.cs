@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Backoffice.Application.Abstractions;
+using Backoffice.Application.Audit;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Eventing;
+using Backoffice.Domain.Audit;
 using Backoffice.Domain.Eventing;
 using Backoffice.Infrastructure.Eventing;
 using Confluent.Kafka;
@@ -10,12 +12,14 @@ using Microsoft.Extensions.Options;
 namespace Backoffice.Workers;
 
 /// <summary>
-/// Consumes `backoffice.events.v1`, deduplicating via the inbox and applying the sole
-/// consumer-side effect currently defined (a fired `CASE_EXPIRY` timer transitions its case),
-/// retrying up to 3 attempts before recording a durable dead letter and publishing to the DLQ
-/// topic (spec: eventing-reliability, "Consumer inbox deduplication" and "Retry with backoff
-/// and dead-letter queue"). Commits the offset after processed/duplicate/dead-lettered,
-/// matching contracts/messaging/topology.yaml's `commitOffsetAfter`.
+/// Consumes `backoffice.events.v1`, deduplicating via the inbox, ingesting every event into
+/// the append-only audit store (spec: audit-compliance, "Append-only audit ingestion"), and
+/// applying the sole consumer-side effect currently defined (a fired `CASE_EXPIRY` timer
+/// transitions its case), retrying up to 3 attempts before recording a durable dead letter
+/// and publishing to the DLQ topic (spec: eventing-reliability, "Consumer inbox
+/// deduplication" and "Retry with backoff and dead-letter queue"). Commits the offset after
+/// processed/duplicate/dead-lettered, matching contracts/messaging/topology.yaml's
+/// `commitOffsetAfter`.
 /// </summary>
 public sealed class WorkflowConsumerWorker(
     IServiceScopeFactory scopeFactory,
@@ -89,6 +93,7 @@ public sealed class WorkflowConsumerWorker(
 
         using var scope = scopeFactory.CreateScope();
         var inboxRepository = scope.ServiceProvider.GetRequiredService<IInboxRepository>();
+        var auditRepository = scope.ServiceProvider.GetRequiredService<IAuditRepository>();
         var caseRepository = scope.ServiceProvider.GetRequiredService<ICaseRepository>();
         var deadLetterRepository = scope.ServiceProvider.GetRequiredService<IDeadLetterRepository>();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
@@ -106,6 +111,10 @@ public sealed class WorkflowConsumerWorker(
             {
                 await ApplyEffectAsync(envelope, caseRepository, clock, cancellationToken);
                 inboxRepository.Add(InboxRecord.Create(config.ConsumerGroup, envelope.EventId, "{\"status\":\"PROCESSED\"}", clock.UtcNow));
+                auditRepository.Add(AuditRecord.Create(
+                    envelope.EventId, envelope.EventType, envelope.TenantId, envelope.CaseId, envelope.CorrelationId, envelope.CausationId,
+                    ExtractString(envelope.Payload, "policyAction"), ExtractRuleReferences(envelope.Payload),
+                    rawEnvelope, envelope.OccurredAt, clock.UtcNow));
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 logger.LogInformation("Event {EventId} processed", envelope.EventId);
                 return;
@@ -148,5 +157,22 @@ public sealed class WorkflowConsumerWorker(
 
         var @case = await caseRepository.FindByIdAsync(envelope.TenantId, envelope.CaseId, cancellationToken);
         @case?.ExpireIfEligible(envelope.CorrelationId, clock.UtcNow);
+    }
+
+    private static string? ExtractString(JsonElement payload, string propertyName) =>
+        payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static IReadOnlyList<string> ExtractRuleReferences(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("ruleReferences", out var value)
+            || value.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return value.EnumerateArray().Select(e => e.GetString() ?? string.Empty).Where(s => s.Length > 0).ToList();
     }
 }

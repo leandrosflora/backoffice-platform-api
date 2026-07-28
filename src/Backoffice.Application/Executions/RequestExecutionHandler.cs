@@ -102,7 +102,8 @@ public sealed class RequestExecutionHandler(
 
         @case.Transition(
             @case.CaseVersion, CaseState.ExecutionPending, "ExecutionRequested", actorId, "execution",
-            correlationId, null, "Governed execution requested.", clock.UtcNow);
+            correlationId, null, "Governed execution requested.", clock.UtcNow,
+            BusinessRuleReferences.ExecutionRequested, PolicyActions.ExecutionRequest);
 
         // Durably record the pending execution + idempotency mapping before calling the
         // gateway, so a crash mid-call never leaves a retry able to double-submit.
@@ -116,13 +117,15 @@ public sealed class RequestExecutionHandler(
                 execution.MarkSucceeded(result.ExternalReference, clock.UtcNow);
                 @case.Transition(
                     @case.CaseVersion, CaseState.Executed, "ExecutionCompleted", actorId, "execution",
-                    correlationId, null, "Execution succeeded.", clock.UtcNow);
+                    correlationId, null, "Execution succeeded.", clock.UtcNow,
+                    BusinessRuleReferences.ExecutionCompleted, PolicyActions.ExecutionRequest);
                 break;
             case ExecutionOutcome.Failed:
                 execution.MarkFailed(clock.UtcNow);
                 @case.Transition(
                     @case.CaseVersion, CaseState.Failed, "ExecutionFailed", actorId, "execution",
-                    correlationId, null, "Execution failed.", clock.UtcNow);
+                    correlationId, null, "Execution failed.", clock.UtcNow,
+                    BusinessRuleReferences.ExecutionFailed, PolicyActions.ExecutionRequest);
                 break;
             case ExecutionOutcome.Ambiguous:
                 // Never a silent success and never auto-retried under a new key — reconciliation
@@ -130,7 +133,8 @@ public sealed class RequestExecutionHandler(
                 execution.MarkReconciliationRequired(clock.UtcNow);
                 @case.Transition(
                     @case.CaseVersion, CaseState.ReconciliationRequired, "ReconciliationRequired", actorId, "execution",
-                    correlationId, null, "Execution result was ambiguous; reconciliation required.", clock.UtcNow);
+                    correlationId, null, "Execution result was ambiguous; reconciliation required.", clock.UtcNow,
+                    BusinessRuleReferences.ReconciliationRequired, PolicyActions.ExecutionRequest);
                 break;
         }
 

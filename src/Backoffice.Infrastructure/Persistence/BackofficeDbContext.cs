@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Backoffice.Domain.Approvals;
+using Backoffice.Domain.Audit;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Documents;
 using Backoffice.Domain.Evidence;
@@ -30,6 +31,7 @@ public sealed class BackofficeDbContext(DbContextOptions<BackofficeDbContext> op
     public DbSet<EventTimer> Timers => Set<EventTimer>();
     public DbSet<DeadLetter> DeadLetters => Set<DeadLetter>();
     public DbSet<ReplayAuditEntry> ReplayAudits => Set<ReplayAuditEntry>();
+    public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -92,6 +94,10 @@ public sealed class BackofficeDbContext(DbContextOptions<BackofficeDbContext> op
                 origin = entry.Origin,
                 reason = entry.Reason,
                 occurredAt = entry.OccurredAt,
+                // Populated only for recommendation/approval/execution decisions (spec:
+                // audit-compliance, "Traceability to business rules") — empty/null otherwise.
+                ruleReferences = entry.RuleReferences,
+                policyAction = entry.PolicyAction,
             });
 
             Outbox.Add(OutboxMessage.Create(

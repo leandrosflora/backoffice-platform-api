@@ -83,4 +83,62 @@ public class CaseTests
         Assert.Equal(expectedVersion + 1, @case.CaseVersion);
         Assert.Equal(2, @case.Timeline.Count);
     }
+
+    [Fact]
+    public void Transition_WithRuleReferencesAndPolicyAction_PersistsOnTimelineEntry()
+    {
+        var @case = NewCase();
+
+        @case.Transition(
+            @case.CaseVersion,
+            CaseState.DocumentsReceived,
+            "DocumentReceived",
+            "actor-1",
+            "documents",
+            Guid.NewGuid(),
+            null,
+            "first document received",
+            DateTimeOffset.UtcNow,
+            ruleReferences: ["BR-002", "BR-005"],
+            policyAction: "document.register");
+
+        var entry = @case.Timeline.Single(t => t.EventType == "DocumentReceived");
+        Assert.Equal(["BR-002", "BR-005"], entry.RuleReferences);
+        Assert.Equal("document.register", entry.PolicyAction);
+    }
+
+    [Fact]
+    public void Transition_WithoutRuleReferences_DefaultsToEmpty()
+    {
+        var @case = NewCase();
+
+        var entry = @case.Timeline.Single();
+        Assert.Empty(entry.RuleReferences);
+        Assert.Null(entry.PolicyAction);
+    }
+
+    [Fact]
+    public void ExpireIfEligible_FromAwaitingDocuments_TransitionsToExpired()
+    {
+        var @case = NewCase();
+        @case.Transition(
+            @case.CaseVersion, CaseState.AwaitingDocuments, "DocumentsRequested", "actor-1", "documents",
+            Guid.NewGuid(), null, "awaiting documents", DateTimeOffset.UtcNow);
+
+        var expired = @case.ExpireIfEligible(Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        Assert.True(expired);
+        Assert.Equal(CaseState.Expired, @case.State);
+    }
+
+    [Fact]
+    public void ExpireIfEligible_FromIneligibleState_ReturnsFalseWithoutThrowing()
+    {
+        var @case = NewCase(); // CREATED -> Expired is not an allowed transition
+
+        var expired = @case.ExpireIfEligible(Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        Assert.False(expired);
+        Assert.Equal(CaseState.Created, @case.State);
+    }
 }

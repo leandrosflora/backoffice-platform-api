@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Backoffice.Domain.Cases;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Backoffice.Infrastructure.Persistence.Configurations;
@@ -20,6 +22,16 @@ public sealed class TimelineEntryConfiguration : IEntityTypeConfiguration<Timeli
         builder.Property(t => t.ActorId).IsRequired().HasMaxLength(128);
         builder.Property(t => t.Origin).IsRequired().HasMaxLength(128);
         builder.Property(t => t.Reason).IsRequired().HasMaxLength(1024);
+        builder.Property(t => t.PolicyAction).HasMaxLength(128);
+
+        builder.Property(t => t.RuleReferences)
+            .HasConversion(
+                rules => JsonSerializer.Serialize(rules, (JsonSerializerOptions?)null),
+                json => JsonSerializer.Deserialize<List<string>>(json, (JsonSerializerOptions?)null) ?? new List<string>())
+            .Metadata.SetValueComparer(new ValueComparer<IReadOnlyList<string>>(
+                (a, b) => a!.SequenceEqual(b!),
+                a => a.Aggregate(0, (hash, s) => HashCode.Combine(hash, s.GetHashCode())),
+                a => a.ToList()));
 
         builder.HasIndex(t => new { t.CaseId, t.CaseVersion });
     }

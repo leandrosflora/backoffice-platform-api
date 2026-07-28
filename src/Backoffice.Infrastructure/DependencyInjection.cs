@@ -1,5 +1,6 @@
 using Backoffice.Application.Abstractions;
 using Backoffice.Application.Approvals;
+using Backoffice.Application.Audit;
 using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
 using Backoffice.Application.Eventing;
@@ -8,6 +9,7 @@ using Backoffice.Application.Investigations;
 using Backoffice.Application.Policy;
 using Backoffice.Application.Recommendations;
 using Backoffice.Infrastructure.Approvals;
+using Backoffice.Infrastructure.Audit;
 using Backoffice.Infrastructure.Documents;
 using Backoffice.Infrastructure.Eventing;
 using Backoffice.Infrastructure.Executions;
@@ -91,6 +93,8 @@ public static class DependencyInjection
         services.AddScoped<ListDeadLettersHandler>();
         services.AddScoped<ListTimersHandler>();
         services.AddScoped<ReplayDeadLetterHandler>();
+
+        services.AddScoped<IAuditRepository, AuditRepository>();
 
         return services;
     }
