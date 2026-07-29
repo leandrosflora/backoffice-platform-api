@@ -5,14 +5,17 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Backoffice.Application.Cases;
+using Backoffice.Application.Identity;
 using Backoffice.Domain.Cases;
 using Backoffice.Infrastructure.Identity;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
+using JwtSecurityAlgorithms = Microsoft.IdentityModel.Tokens.SecurityAlgorithms;
 
 namespace Backoffice.Api.Tests;
 
@@ -90,7 +93,7 @@ public class JwtIdentityTests(BackofficeApiFactory factory) : IClassFixture<Back
             Audience = audience,
             IssuedAt = now,
             Expires = now.AddMinutes(2),
-            SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256),
+            SigningCredentials = new SigningCredentials(signingKey, JwtSecurityAlgorithms.RsaSha256),
             Claims = new Dictionary<string, object>
             {
                 ["sub"] = subject,
@@ -310,7 +313,7 @@ public class JwtIdentityTests(BackofficeApiFactory factory) : IClassFixture<Back
             Options.Create(new IdentityOptions
             {
                 Audience = Audience,
-                AllowedAlgorithms = [SecurityAlgorithms.RsaSha256],
+                AllowedAlgorithms = [JwtSecurityAlgorithms.RsaSha256],
                 MaxTtlSeconds = 300,
             }),
             configurationManager);
@@ -338,7 +341,7 @@ public class JwtIdentityTests(BackofficeApiFactory factory) : IClassFixture<Back
             Options.Create(new IdentityOptions
             {
                 Audience = Audience,
-                AllowedAlgorithms = [SecurityAlgorithms.RsaSha256],
+                AllowedAlgorithms = [JwtSecurityAlgorithms.RsaSha256],
                 MaxTtlSeconds = 300,
             }),
             configurationManager);
