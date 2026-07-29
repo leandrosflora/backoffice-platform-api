@@ -22,5 +22,30 @@ public sealed class DocumentRepository(BackofficeDbContext dbContext) : IDocumen
         return documents.OrderBy(d => d.CreatedAt).ToList();
     }
 
+    public async Task<IReadOnlyList<Document>> ListPendingProcessingAsync(
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        // Keep ordering client-side for SQLite parity in integration tests. The production
+        // worker uses a small batch and a single replica until lease-based claiming is added.
+        var pending = await dbContext.Documents
+            .AsNoTracking()
+            .Where(document =>
+                document.Status == DocumentStatus.Quarantined
+                || document.Status == DocumentStatus.Validating)
+            .ToListAsync(cancellationToken);
+
+        return pending
+            .OrderBy(document => document.CreatedAt)
+            .ThenBy(document => document.DocumentId)
+            .Take(limit)
+            .ToList();
+    }
+
     public void Add(Document document) => dbContext.Documents.Add(document);
 }

@@ -27,6 +27,8 @@ namespace Backoffice.Api.Tests;
 public sealed class BackofficeApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    private readonly string _documentStorageRoot = Path.Combine(
+        Path.GetTempPath(), "backoffice-api-tests", Guid.NewGuid().ToString("N"));
     private OpaTestServer? _opaServer;
 
     /// <summary>
@@ -36,6 +38,12 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>, IAsyn
     /// constructor, so this is a settable property rather than a constructor parameter.
     /// </summary>
     public Action<IServiceCollection>? ConfigureTestServices { get; set; }
+
+    /// <summary>
+    /// Defaults to inline for the existing endpoint tests. Set false in intake tests to
+    /// exercise the deployed worker boundary and assert the durable QUARANTINED response.
+    /// </summary>
+    public bool InlineDocumentProcessing { get; init; } = true;
 
     /// <summary>The real OPA test server's base URL, available once InitializeAsync has run.</summary>
     public string OpaBaseUrl => _opaServer?.BaseUrl
@@ -57,6 +65,9 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>, IAsyn
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("Opa:BaseUrl", OpaBaseUrl);
+        builder.UseSetting("DocumentStorage:RootPath", _documentStorageRoot);
+        builder.UseSetting("DocumentProcessing:Inline", InlineDocumentProcessing ? "true" : "false");
+        builder.UseSetting("MalwareScan:Mode", "noop");
 
         builder.ConfigureServices(services =>
         {
@@ -89,6 +100,10 @@ public sealed class BackofficeApiFactory : WebApplicationFactory<Program>, IAsyn
         {
             _connection.Dispose();
             _opaServer?.Dispose();
+            if (Directory.Exists(_documentStorageRoot))
+            {
+                Directory.Delete(_documentStorageRoot, recursive: true);
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ using Backoffice.Application.Cases;
 using Backoffice.Application.Documents;
 using Backoffice.Domain.Cases;
 using Backoffice.Domain.Documents;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Backoffice.Api.Tests;
 
@@ -52,6 +53,7 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         Assert.Equal(DocumentStatus.Validated, document!.Status);
+        Assert.StartsWith("document-store://accepted/", document.StorageReference);
 
         var caseAfter = await (await client.GetAsync($"/v1/cases/{@case.CaseId}")).Content.ReadFromJsonAsync<CaseResponse>(JsonOptions);
         Assert.Equal(CaseState.DocumentsValidated, caseAfter!.State);
@@ -62,6 +64,67 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
         Assert.Equal(document.DocumentId.ToString(), evidence![0].SourceReference);
         Assert.Equal(document.Version.ToString(), evidence[0].SourceVersion);
         Assert.True(evidence[0].Confidence > 0.5);
+    }
+
+    [Fact]
+    public async Task RegisterDocument_AsyncMode_DurablyAcceptsIntoQuarantineBeforeReturning()
+    {
+        var asyncFactory = new BackofficeApiFactory { InlineDocumentProcessing = false };
+        await asyncFactory.InitializeAsync();
+
+        try
+        {
+            var client = asyncFactory.CreateClient();
+            client.DefaultRequestHeaders.Add(RequestContext.TenantHeader, "tenant-doc-async");
+            client.DefaultRequestHeaders.Add(RequestContext.SubjectHeader, "test-actor");
+            client.DefaultRequestHeaders.Add(RequestContext.RolesHeader, "case-manager,document-processor,auditor");
+            var @case = await CreateCaseAsync(client, "ext-doc-async-1");
+            var fileBytes = "durably quarantined test content"u8.ToArray();
+            var request = DocumentUploadTestHelper.BuildRequest(
+                @case.CaseId,
+                @case.CaseVersion,
+                DocumentType.Receipt,
+                MediaType.ApplicationPdf,
+                "../receipt.pdf",
+                fileBytes);
+
+            var response = await client.SendAsync(request);
+            var document = await response.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
+
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+            Assert.Equal(DocumentStatus.Quarantined, document!.Status);
+            Assert.StartsWith("document-store://quarantine/", document.StorageReference);
+            Assert.DoesNotContain("tenant-doc-async", document.StorageReference, StringComparison.Ordinal);
+            Assert.DoesNotContain("..", document.StorageReference, StringComparison.Ordinal);
+
+            using var scope = asyncFactory.Services.CreateScope();
+            var storage = scope.ServiceProvider.GetRequiredService<IDocumentStorage>();
+            var storedDocument = await storage.ReadAsync(document.StorageReference);
+            Assert.Equal(fileBytes, storedDocument.Content);
+            Assert.Equal("receipt.pdf", storedDocument.FileName);
+        }
+        finally
+        {
+            await ((IAsyncLifetime)asyncFactory).DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RegisterDocument_OverUploadLimit_ReturnsPayloadTooLarge()
+    {
+        var client = CreateClient("tenant-doc-too-large");
+        var @case = await CreateCaseAsync(client, "ext-doc-too-large-1");
+        var request = DocumentUploadTestHelper.BuildRequest(
+            @case.CaseId,
+            @case.CaseVersion,
+            DocumentType.Receipt,
+            MediaType.ApplicationPdf,
+            "oversized.pdf",
+            new byte[10 * 1024 * 1024 + 1]);
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
     }
 
     [Fact]

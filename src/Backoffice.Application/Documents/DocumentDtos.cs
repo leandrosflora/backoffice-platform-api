@@ -8,7 +8,7 @@ namespace Backoffice.Application.Documents;
 /// type requires) and supplies the real file bytes; the checksum is computed server-side from
 /// those bytes (no longer client-supplied — trusting a client-computed checksum was never
 /// meaningful once the server has the actual content to hash) and the storage reference is
-/// server-generated, since this system still has no real blob store behind it.
+/// server-generated after the content is durably written to quarantine.
 /// </summary>
 public sealed record RegisterDocumentRequest(
     DocumentType DocumentType,

@@ -1,4 +1,5 @@
 using Backoffice.Application.Documents;
+using Backoffice.Infrastructure.Documents;
 using Backoffice.Application.Policy;
 using Backoffice.Domain.Documents;
 
@@ -11,13 +12,13 @@ public static class DocumentsEndpoints
 {
     public static IEndpointRouteBuilder MapDocumentsEndpoints(this IEndpointRouteBuilder app)
     {
-        // multipart/form-data, not a JSON body — the real file now has to reach the
-        // document-analysis service, not just a mock storage-reference string (spec:
-        // document-intelligence).
+        // multipart/form-data, not a JSON body. The request completes after durable
+        // quarantine intake; the worker performs malware scan and analysis asynchronously.
         app.MapPost("/v1/cases/{caseId:guid}/documents", async (
             Guid caseId,
             HttpRequest httpRequest,
             RegisterDocumentHandler handler,
+            DocumentStorageOptions storageOptions,
             CancellationToken cancellationToken) =>
         {
             var tenantId = RequestContext.RequireTenantId(httpRequest);
@@ -32,6 +33,13 @@ public static class DocumentsEndpoints
             if (file is null || file.Length == 0)
             {
                 return Results.BadRequest(new { detail = "Missing 'file' field." });
+            }
+
+            if (file.Length > storageOptions.MaxUploadBytes)
+            {
+                return Results.Problem(
+                    detail: $"File exceeds the configured {storageOptions.MaxUploadBytes}-byte upload limit.",
+                    statusCode: StatusCodes.Status413PayloadTooLarge);
             }
 
             var documentType = PolicyWireFormat.FromWireString<DocumentType>(form["documentType"].ToString());
