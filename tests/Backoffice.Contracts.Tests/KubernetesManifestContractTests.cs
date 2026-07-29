@@ -82,9 +82,9 @@ public sealed class KubernetesManifestContractTests
     [Fact]
     public void Namespace_EnforcesRestrictedPodSecurityAtPinnedKubernetesVersion()
     {
-        var namespace = ReadDocuments()
+        var namespaceDocument = ReadDocuments()
             .Single(document => Scalar(document, "kind") == "Namespace");
-        var labels = Map(Map(namespace, "metadata"), "labels");
+        var labels = Map(Map(namespaceDocument, "metadata"), "labels");
 
         foreach (var mode in new[] { "enforce", "audit", "warn" })
         {
