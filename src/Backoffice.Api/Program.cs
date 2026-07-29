@@ -32,6 +32,7 @@ else
 }
 builder.Services.AddExceptionHandler<BackofficeExceptionHandler>();
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(
@@ -61,6 +62,11 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 
 app.UseExceptionHandler();
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
+{
+    app.MapOpenApi();
+}
+
 app.UseMiddleware<JwtIdentityMiddleware>();
 app.UseMiddleware<HttpMetricsMiddleware>();
 app.MapPrometheusScrapingEndpoint();
