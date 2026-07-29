@@ -61,20 +61,18 @@ public class InvestigationRecommendationTests(BackofficeApiFactory factory) : IC
             $"/v1/cases/{caseId}/recommendations", new CreateRecommendationRequest(caseVersion, investigationId), JsonOptions);
 
     [Fact]
-    public async Task StartInvestigation_NoEvidence_IsRejectedByPolicy()
+    public async Task StartInvestigation_ReviewRequiredDocument_IsRejectedByPolicy()
     {
         var client = CreateClient("tenant-inv-empty");
         var @case = await CreateCaseAsync(client, "ext-inv-empty-1");
 
-        // Unrecognized filename: document validates (satisfies the Receipt requirement) but
-        // the classifier abstains, so no Evidence record is created for it.
+        // An unrecognized document requires human review, creates no evidence and cannot
+        // satisfy the Receipt requirement. The case therefore stays at DocumentsReceived.
         var caseAfterDoc = await RegisterDocumentToValidatedAsync(client, @case.CaseId, @case.CaseVersion, "file-0001.pdf");
-        Assert.Equal(CaseState.DocumentsValidated, caseAfterDoc.State);
+        Assert.Equal(CaseState.DocumentsReceived, caseAfterDoc.State);
 
-        // policies/authorization.rego's investigation.execute rule requires evidence_present,
-        // so a case with zero evidence is denied (403) before InvestigationEngine ever runs.
-        // The MissingData-finding path for zero-evidence input is still covered directly
-        // against InvestigationEngine by Backoffice.Evals, bypassing HTTP/OPA.
+        // Defense in depth: OPA also requires DOCUMENTS_VALIDATED and evidence_present for
+        // investigation.execute, so attempting to bypass the workflow is denied with 403.
         var response = await StartInvestigationAsync(client, @case.CaseId, caseAfterDoc.CaseVersion);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
