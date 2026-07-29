@@ -110,9 +110,73 @@ public class PolicyEnforcementTests(BackofficeApiFactory factory) : IClassFixtur
         Assert.True(decision.Allow);
     }
 
+    [Fact]
+    public async Task Enforce_JwtPurposeDoesNotMatchRequestedAction_DeniesBeforePdp()
+    {
+        var fakeClient = new RecordingAllowClient();
+        var enforcer = new PolicyEnforcer(
+            fakeClient,
+            new JwtCallerIdentityAccessor("APPROVAL"));
+        var input = new AuthorizationInput(
+            new PolicySubject("test-actor", PolicySubjectTypes.Human, "tenant-purpose", ["case-manager"]),
+            PolicyActions.CaseCreate,
+            new PolicyResource(PolicyResourceTypes.Case, Guid.NewGuid().ToString(), "tenant-purpose"),
+            PolicyPurposes.CaseProcessing,
+            Guid.NewGuid().ToString(),
+            new Dictionary<string, object?>());
+
+        var exception = await Assert.ThrowsAsync<PolicyDeniedException>(
+            () => enforcer.EnforceAsync(input));
+
+        Assert.Contains("token-purpose-mismatch", exception.Message);
+        Assert.Equal(0, fakeClient.CallCount);
+    }
+
+    [Fact]
+    public async Task Enforce_JwtPurposeAliasForCaseProcessing_IsAccepted()
+    {
+        var fakeClient = new RecordingAllowClient();
+        var enforcer = new PolicyEnforcer(
+            fakeClient,
+            new JwtCallerIdentityAccessor("CASE_MANAGEMENT"));
+        var input = new AuthorizationInput(
+            new PolicySubject("test-actor", PolicySubjectTypes.Human, "tenant-purpose", ["case-manager"]),
+            PolicyActions.CaseCreate,
+            new PolicyResource(PolicyResourceTypes.Case, Guid.NewGuid().ToString(), "tenant-purpose"),
+            PolicyPurposes.CaseProcessing,
+            Guid.NewGuid().ToString(),
+            new Dictionary<string, object?>());
+
+        var result = await enforcer.EnforceAsync(input);
+
+        Assert.True(result.Allow);
+        Assert.Equal(1, fakeClient.CallCount);
+    }
+
     private sealed class AlwaysAllowWithObligationClient(params string[] obligations) : IPolicyDecisionClient
     {
         public Task<AuthorizationDecision> EvaluateAsync(AuthorizationInput input, CancellationToken cancellationToken = default) =>
             Task.FromResult(new AuthorizationDecision(true, "allowed", obligations));
+    }
+
+    private sealed class RecordingAllowClient : IPolicyDecisionClient
+    {
+        public int CallCount { get; private set; }
+
+        public Task<AuthorizationDecision> EvaluateAsync(
+            AuthorizationInput input,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(new AuthorizationDecision(true, "allowed", []));
+        }
+    }
+
+    private sealed class JwtCallerIdentityAccessor(string purpose) : ICallerIdentityAccessor
+    {
+        public string? AuthenticationMethod => "SIGNED_JWT";
+        public string? TokenId => "token-1";
+        public string? Purpose => purpose;
+        public string IdentityMode => "jwt";
     }
 }

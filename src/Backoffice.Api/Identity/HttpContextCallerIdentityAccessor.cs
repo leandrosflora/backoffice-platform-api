@@ -18,5 +18,6 @@ public sealed class HttpContextCallerIdentityAccessor(
 
     public string? AuthenticationMethod => Current?.AuthenticationMethod;
     public string? TokenId => Current?.TokenId;
+    public string? Purpose => Current?.Purpose;
     public string IdentityMode => identityOptions.Value.Mode;
 }

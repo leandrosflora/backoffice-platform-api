@@ -68,18 +68,24 @@ public static class RequestContext
     }
 
     /// <summary>
-    /// Interim stand-in for the approver's authority limit (alçada), which section 11
-    /// (identity-security) will instead derive from a validated JWT claim. Defaults to
-    /// unlimited when absent, since there is no real identity/role system yet — tests and
-    /// callers that need the alçada check to actually bind must set this header explicitly.
+    /// In the JWT profile the alçada comes only from the signed authority_limit claim.
+    /// A missing claim resolves to zero (fail closed), and a spoofed header has no effect.
+    /// The interim header remains available only in the local headers profile.
     /// </summary>
     public const string AuthorityLimitHeader = "X-Authority-Limit";
 
-    public static decimal GetAuthorityLimit(HttpRequest request) =>
-        request.Headers.TryGetValue(AuthorityLimitHeader, out var value)
-        && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
-            ? parsed
-            : decimal.MaxValue;
+    public static decimal GetAuthorityLimit(HttpRequest request)
+    {
+        if (TryGetResolvedIdentity(request) is { } identity)
+        {
+            return identity.AuthorityLimit ?? 0m;
+        }
+
+        return request.Headers.TryGetValue(AuthorityLimitHeader, out var value)
+            && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : decimal.MaxValue;
+    }
 
     /// <summary>Required for every governed-execution request (spec: governed-execution, BR-017).</summary>
     public static string RequireIdempotencyKey(HttpRequest request)

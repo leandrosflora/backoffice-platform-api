@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.10" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.2.1" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.2.1" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
     <PackageReference Include="NSec.Cryptography" Version="26.4.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />

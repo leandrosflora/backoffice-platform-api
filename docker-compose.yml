@@ -209,6 +209,35 @@ services:
       start_period: 5s
     profiles: [secure]
 
+  oidc-api:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Api/Dockerfile
+    environment:
+      <<: *api-environment
+      Identity__Mode: jwt
+      Identity__PublicKeyPath: ""
+      Identity__Authority: ${OIDC_AUTHORITY:-}
+      Identity__Audience: ${OIDC_AUDIENCE:-intelligent-backoffice-api}
+      Identity__RequireHttpsMetadata: "true"
+      Identity__MaxTtlSeconds: "${OIDC_MAX_TTL_SECONDS:-300}"
+    ports:
+      - "${OIDC_APP_PORT:-8083}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      document-intelligence:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    profiles: [oidc]
+
   distributed-api:
     build:
       context: .

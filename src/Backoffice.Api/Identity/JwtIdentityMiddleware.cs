@@ -42,7 +42,7 @@ public sealed class JwtIdentityMiddleware(RequestDelegate next)
         ResolvedIdentity identity;
         try
         {
-            identity = validator.Validate(token);
+            identity = await validator.ValidateAsync(token, context.RequestAborted);
         }
         catch (JwtValidationException exception)
         {

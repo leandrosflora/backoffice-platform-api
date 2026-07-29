@@ -12,4 +12,6 @@ public sealed record ResolvedIdentity(
     IReadOnlyList<string> Roles,
     string TenantId,
     string AuthenticationMethod,
-    string TokenId);
+    string TokenId,
+    string Purpose,
+    decimal? AuthorityLimit);

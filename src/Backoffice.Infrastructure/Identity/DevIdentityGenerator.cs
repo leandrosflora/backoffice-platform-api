@@ -44,7 +44,8 @@ public static class DevIdentityGenerator
         IReadOnlyList<string> roles,
         string purpose,
         int ttlSeconds = 60,
-        string? jti = null)
+        string? jti = null,
+        decimal? authorityLimit = null)
     {
         var privateKey = EdDsaKeyLoader.LoadPrivateKey(privateKeyPemPath);
         var signingKey = new EdDsaSecurityKey(privateKey);
@@ -67,6 +68,11 @@ public static class DevIdentityGenerator
                 ["jti"] = jti ?? Guid.NewGuid().ToString(),
             },
         };
+
+        if (authorityLimit is not null)
+        {
+            descriptor.Claims["authority_limit"] = authorityLimit.Value;
+        }
 
         return new JsonWebTokenHandler().CreateToken(descriptor);
     }

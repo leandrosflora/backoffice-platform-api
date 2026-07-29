@@ -14,6 +14,7 @@ public interface ICallerIdentityAccessor
 {
     string? AuthenticationMethod { get; }
     string? TokenId { get; }
+    string? Purpose { get; }
 
     /// <summary>The server-wide identity profile ("headers" or "jwt"), passed to the PDP as
     /// `context.identity_mode` only when it's "jwt" (spec: identity-security, "Rejection of
@@ -29,5 +30,6 @@ public sealed class NullCallerIdentityAccessor : ICallerIdentityAccessor
 {
     public string? AuthenticationMethod => null;
     public string? TokenId => null;
+    public string? Purpose => null;
     public string IdentityMode => "headers";
 }
