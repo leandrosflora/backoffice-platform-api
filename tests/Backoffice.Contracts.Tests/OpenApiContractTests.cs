@@ -75,7 +75,7 @@ public class OpenApiContractTests
         Assert.Contains(path, paths.Keys);
     }
 
-obsolete undocumented timers test    [Fact]
+    [Fact]
     public void PlatformApi_CasesPathRefTargetFileExists()
     {
         var document = ReadPlatformApi();
