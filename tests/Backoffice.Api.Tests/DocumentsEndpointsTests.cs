@@ -82,7 +82,7 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
     }
 
     [Fact]
-    public async Task RegisterDocument_UnrecognizedFilename_AbstainsFromClassificationEvidence()
+    public async Task RegisterDocument_UnrecognizedFilename_RequiresReviewAndDoesNotAdvanceCase()
     {
         var client = CreateClient("tenant-doc-unknown");
         var @case = await CreateCaseAsync(client, "ext-doc-unknown-1");
@@ -91,7 +91,34 @@ public class DocumentsEndpointsTests(BackofficeApiFactory factory) : IClassFixtu
             DocumentType.Receipt, MediaType.ApplicationPdf, "file-20260727-0001.pdf");
         var document = await response.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
 
-        Assert.Equal(DocumentStatus.Validated, document!.Status);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal(DocumentStatus.ReviewRequired, document!.Status);
+
+        var caseAfter = await (await client.GetAsync($"/v1/cases/{@case.CaseId}")).Content
+            .ReadFromJsonAsync<CaseResponse>(JsonOptions);
+        Assert.Equal(CaseState.DocumentsReceived, caseAfter!.State);
+
+        var evidence = await (await client.GetAsync($"/v1/cases/{@case.CaseId}/evidence")).Content
+            .ReadFromJsonAsync<List<EvidenceResponse>>(JsonOptions);
+        Assert.Empty(evidence!);
+    }
+
+    [Fact]
+    public async Task RegisterDocument_ClassificationMismatch_RequiresReviewAndDoesNotCreateEvidence()
+    {
+        var client = CreateClient("tenant-doc-mismatch");
+        var @case = await CreateCaseAsync(client, "ext-doc-mismatch-1");
+
+        var response = await RegisterDocumentAsync(client, @case.CaseId, @case.CaseVersion,
+            DocumentType.Receipt, MediaType.ApplicationXlsx, "statement-july-2026.xlsx");
+        var document = await response.Content.ReadFromJsonAsync<DocumentResponse>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal(DocumentStatus.ReviewRequired, document!.Status);
+
+        var caseAfter = await (await client.GetAsync($"/v1/cases/{@case.CaseId}")).Content
+            .ReadFromJsonAsync<CaseResponse>(JsonOptions);
+        Assert.Equal(CaseState.DocumentsReceived, caseAfter!.State);
 
         var evidence = await (await client.GetAsync($"/v1/cases/{@case.CaseId}/evidence")).Content
             .ReadFromJsonAsync<List<EvidenceResponse>>(JsonOptions);
