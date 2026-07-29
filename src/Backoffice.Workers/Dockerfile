@@ -1,6 +1,6 @@
 # Build from the repository root: docker build -f src/Backoffice.Workers/Dockerfile .
-# One image serves all three worker deployables (outbox dispatcher, workflow consumer, timer
-# firing) plus the single-process "all" role, selected at runtime via the Worker__Role
+# One image serves all four worker deployables (document processor, outbox dispatcher,
+# workflow consumer, timer firing) plus the single-process "all" role, selected at runtime via the Worker__Role
 # environment variable (see Program.cs) — matching the reference Python sample's pattern of
 # reusing one build for outbox-publisher/workflow-worker/timer-worker with a different
 # `command` per container (spec: platform-deployment, task 12.1).
@@ -26,7 +26,9 @@ RUN dotnet publish src/Backoffice.Workers/Backoffice.Workers.csproj -c Release -
 # even though this worker process itself never listens on HTTP.
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 RUN groupadd --gid 10001 backoffice \
-    && useradd --uid 10001 --gid backoffice --shell /usr/sbin/nologin --no-create-home backoffice
+    && useradd --uid 10001 --gid backoffice --shell /usr/sbin/nologin --no-create-home backoffice \
+    && mkdir -p /var/lib/backoffice/documents \
+    && chown -R 10001:10001 /var/lib/backoffice
 WORKDIR /app
 COPY --from=build /app/publish .
 USER 10001:10001

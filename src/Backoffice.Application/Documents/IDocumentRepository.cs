@@ -8,5 +8,7 @@ public interface IDocumentRepository
 
     Task<IReadOnlyList<Document>> ListByCaseAsync(string tenantId, Guid caseId, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Document>> ListPendingProcessingAsync(int limit, CancellationToken cancellationToken = default);
+
     void Add(Document document);
 }

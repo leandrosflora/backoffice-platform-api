@@ -57,13 +57,50 @@ public static class DependencyInjection
 
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IEvidenceRepository, EvidenceRepository>();
-        services.AddScoped<IMalwareScanAdapter, NoOpMalwareScanAdapter>();
+
+        var storageOptions = new DocumentStorageOptions
+        {
+            RootPath = configuration["DocumentStorage:RootPath"] ?? ".local/document-storage",
+            MaxUploadBytes = ParsePositiveLong(
+                configuration["DocumentStorage:MaxUploadBytes"],
+                DocumentStorageOptions.DefaultMaxUploadBytes,
+                "DocumentStorage:MaxUploadBytes"),
+        };
+        var processingOptions = new DocumentProcessingOptions
+        {
+            Inline = bool.TryParse(configuration["DocumentProcessing:Inline"], out var inline) && inline,
+        };
+        var clamAvOptions = new ClamAvOptions
+        {
+            Host = configuration["MalwareScan:ClamAv:Host"] ?? "localhost",
+            Port = ParsePositiveInt(configuration["MalwareScan:ClamAv:Port"], 3310, "MalwareScan:ClamAv:Port"),
+            TimeoutSeconds = ParsePositiveInt(
+                configuration["MalwareScan:ClamAv:TimeoutSeconds"], 30, "MalwareScan:ClamAv:TimeoutSeconds"),
+        };
+        var malwareScanMode = (configuration["MalwareScan:Mode"] ?? "clamav").ToLowerInvariant();
+        if (malwareScanMode is not ("clamav" or "noop"))
+        {
+            throw new InvalidOperationException(
+                $"Unsupported MalwareScan:Mode '{malwareScanMode}'. Expected 'clamav' or 'noop'.");
+        }
+
+        services.AddSingleton(storageOptions);
+        services.AddSingleton(processingOptions);
+        services.AddSingleton(clamAvOptions);
+        services.AddSingleton<IDocumentStorage, FileSystemDocumentStorage>();
+        services.AddScoped<NoOpMalwareScanAdapter>();
+        services.AddScoped<ClamAvMalwareScanAdapter>();
+        services.AddScoped<IMalwareScanAdapter>(serviceProvider =>
+            malwareScanMode == "noop"
+                ? serviceProvider.GetRequiredService<NoOpMalwareScanAdapter>()
+                : serviceProvider.GetRequiredService<ClamAvMalwareScanAdapter>());
         services.AddHttpClient<IDocumentIntelligenceClient, HttpDocumentIntelligenceClient>(client =>
         {
             client.BaseAddress = new Uri(configuration["DocumentIntelligence:BaseUrl"] ?? "http://localhost:8090");
             client.Timeout = TimeSpan.FromSeconds(35);
         });
         services.AddScoped<RegisterDocumentHandler>();
+        services.AddScoped<ProcessDocumentHandler>();
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<ListEvidenceHandler>();
 
@@ -108,6 +145,36 @@ public static class DependencyInjection
         services.AddScoped<IAuditRepository, AuditRepository>();
 
         return services;
+    }
+
+    private static int ParsePositiveInt(string? configuredValue, int fallback, string settingName)
+    {
+        if (configuredValue is null)
+        {
+            return fallback;
+        }
+
+        if (int.TryParse(configuredValue, out var value) && value > 0)
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"{settingName} must be a positive integer.");
+    }
+
+    private static long ParsePositiveLong(string? configuredValue, long fallback, string settingName)
+    {
+        if (configuredValue is null)
+        {
+            return fallback;
+        }
+
+        if (long.TryParse(configuredValue, out var value) && value > 0)
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"{settingName} must be a positive integer.");
     }
 
     /// <summary>

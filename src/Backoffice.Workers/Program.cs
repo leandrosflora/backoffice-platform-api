@@ -17,9 +17,9 @@ builder.Services.AddObservability(builder.Configuration, serviceName: "backoffic
 
 // Worker:Role selects which hosted service(s) this process runs. "all" (the default) runs
 // every worker in one process, for the single-container runtime/secure compose profiles;
-// the distributed profile and Kubernetes instead run three containers from this same image,
-// each pinned to one role, so outbox dispatch/workflow consumption/timer firing scale and
-// fail independently (spec: platform-deployment, task 12.1).
+// the distributed profile instead runs dedicated containers from this same image, each
+// pinned to one role. Document processing is also isolated because it owns filesystem and
+// ClamAV dependencies.
 var role = builder.Configuration["Worker:Role"] ?? "all";
 switch (role)
 {
@@ -32,14 +32,18 @@ switch (role)
     case "timer-firing":
         builder.Services.AddHostedService<TimerFiringWorker>();
         break;
+    case "document-processing":
+        builder.Services.AddHostedService<DocumentProcessingWorker>();
+        break;
     case "all":
         builder.Services.AddHostedService<OutboxDispatcherWorker>();
         builder.Services.AddHostedService<WorkflowConsumerWorker>();
         builder.Services.AddHostedService<TimerFiringWorker>();
+        builder.Services.AddHostedService<DocumentProcessingWorker>();
         break;
     default:
         throw new InvalidOperationException(
-            $"Unknown Worker:Role '{role}'. Expected one of: all, outbox-dispatcher, workflow-consumer, timer-firing.");
+            $"Unknown Worker:Role '{role}'. Expected one of: all, outbox-dispatcher, workflow-consumer, timer-firing, document-processing.");
 }
 
 var app = builder.Build();

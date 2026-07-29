@@ -1,4 +1,5 @@
 using Backoffice.Application.Abstractions;
+using Backoffice.Application.Documents;
 using Backoffice.Infrastructure;
 using Backoffice.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
@@ -17,22 +18,30 @@ public sealed class TestServices : IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly ServiceProvider _serviceProvider;
+    private readonly string _documentStorageRoot;
 
     public FakeClock Clock { get; }
 
     public IServiceScopeFactory ScopeFactory => _serviceProvider.GetRequiredService<IServiceScopeFactory>();
 
-    private TestServices(SqliteConnection connection, ServiceProvider serviceProvider, FakeClock clock)
+    private TestServices(
+        SqliteConnection connection,
+        ServiceProvider serviceProvider,
+        FakeClock clock,
+        string documentStorageRoot)
     {
         _connection = connection;
         _serviceProvider = serviceProvider;
         Clock = clock;
+        _documentStorageRoot = documentStorageRoot;
     }
 
-    public static async Task<TestServices> CreateAsync(string kafkaBootstrapServers)
+    public static async Task<TestServices> CreateAsync(string kafkaBootstrapServers = "unused:9092")
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         connection.Open();
+        var documentStorageRoot = Path.Combine(
+            Path.GetTempPath(), "backoffice-worker-tests", Guid.NewGuid().ToString("N"));
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -41,6 +50,8 @@ public sealed class TestServices : IAsyncDisposable
                 ["Kafka:EventsTopic"] = "backoffice.events.v1",
                 ["Kafka:DlqTopic"] = "backoffice.dlq.v1",
                 ["Kafka:ConsumerGroup"] = "backoffice-workflow-v1",
+                ["DocumentStorage:RootPath"] = documentStorageRoot,
+                ["MalwareScan:Mode"] = "noop",
             })
             .Build();
 
@@ -50,6 +61,7 @@ public sealed class TestServices : IAsyncDisposable
         services.AddInfrastructureCore(configuration);
         services.AddKafkaEventing(configuration);
         services.AddSingleton<IClock>(clock); // registered last so it wins over AddInfrastructureCore's SystemClock
+        services.AddSingleton<IDocumentIntelligenceClient>(new WorkerFakeDocumentIntelligenceClient());
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -58,12 +70,27 @@ public sealed class TestServices : IAsyncDisposable
             await scope.ServiceProvider.GetRequiredService<BackofficeDbContext>().Database.EnsureCreatedAsync();
         }
 
-        return new TestServices(connection, serviceProvider, clock);
+        return new TestServices(connection, serviceProvider, clock, documentStorageRoot);
     }
 
     public async ValueTask DisposeAsync()
     {
         await _serviceProvider.DisposeAsync();
         await _connection.DisposeAsync();
+        if (Directory.Exists(_documentStorageRoot))
+        {
+            Directory.Delete(_documentStorageRoot, recursive: true);
+        }
+    }
+
+    private sealed class WorkerFakeDocumentIntelligenceClient : IDocumentIntelligenceClient
+    {
+        public Task<DocumentAnalysisResult> AnalyzeAsync(
+            byte[] fileContent,
+            string fileName,
+            string mediaType,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new DocumentAnalysisResult(
+                "RECEIPT", 0.9, [], false, "Deterministic worker test result."));
     }
 }

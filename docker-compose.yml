@@ -19,6 +19,12 @@ services:
       timeout: 5s
       retries: 10
 
+  clamav:
+    image: clamav/clamav-debian:1.5.3
+    profiles: ["runtime", "secure", "distributed", "observability"]
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+
   # --- OPA/Redpanda/Prometheus/Grafana/Jaeger/OTel-Collector: same image, command, and
   # healthcheck as intelligent-backoffice-platform-architecture/docker-compose.yml, only the
   # bind-mount source paths are adjusted to point at the sibling repo (spec:
@@ -162,6 +168,15 @@ services:
       Otel__Endpoint: http://otel-collector:4317
       Identity__Mode: headers
       DocumentIntelligence__BaseUrl: http://document-intelligence:8080
+      DocumentStorage__RootPath: /var/lib/backoffice/documents
+      DocumentStorage__MaxUploadBytes: "10485760"
+      DocumentProcessing__Inline: "false"
+      MalwareScan__Mode: clamav
+      MalwareScan__ClamAv__Host: clamav
+      MalwareScan__ClamAv__Port: "3310"
+      MalwareScan__ClamAv__TimeoutSeconds: "30"
+    volumes:
+      - backoffice-document-data:/var/lib/backoffice/documents
     ports:
       - "${APP_PORT:-8080}:8080"
     depends_on:
@@ -170,6 +185,8 @@ services:
       opa:
         condition: service_healthy
       document-intelligence:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3"]
@@ -192,6 +209,7 @@ services:
       Identity__MaxTtlSeconds: "300"
     volumes:
       - ./.local/security/identity-public.pem:/run/identity/identity-public.pem:ro
+      - backoffice-document-data:/var/lib/backoffice/documents
     ports:
       - "${SECURE_APP_PORT:-8082}:8080"
     depends_on:
@@ -200,6 +218,8 @@ services:
       opa:
         condition: service_healthy
       document-intelligence:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3"]
@@ -214,6 +234,8 @@ services:
       context: .
       dockerfile: src/Backoffice.Api/Dockerfile
     environment: *api-environment
+    volumes:
+      - backoffice-document-data:/var/lib/backoffice/documents
     ports:
       - "${DISTRIBUTED_APP_PORT:-8081}:8080"
     depends_on:
@@ -222,6 +244,8 @@ services:
       opa:
         condition: service_healthy
       document-intelligence:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
       redpanda-init:
         condition: service_completed_successfully
@@ -244,6 +268,14 @@ services:
       Kafka__DlqTopic: backoffice.dlq.v1
       Kafka__ConsumerGroup: backoffice-workflow-v1
       Worker__Role: outbox-dispatcher
+      DocumentIntelligence__BaseUrl: http://document-intelligence:8080
+      DocumentStorage__RootPath: /var/lib/backoffice/documents
+      DocumentStorage__MaxUploadBytes: "10485760"
+      DocumentProcessing__Inline: "false"
+      MalwareScan__Mode: clamav
+      MalwareScan__ClamAv__Host: clamav
+      MalwareScan__ClamAv__Port: "3310"
+      MalwareScan__ClamAv__TimeoutSeconds: "30"
     depends_on:
       distributed-api:
         condition: service_healthy
@@ -282,7 +314,28 @@ services:
     restart: unless-stopped
     profiles: [distributed]
 
+  document-processor:
+    build:
+      context: .
+      dockerfile: src/Backoffice.Workers/Dockerfile
+    environment:
+      <<: *worker-environment
+      Worker__Role: document-processing
+    volumes:
+      - backoffice-document-data:/var/lib/backoffice/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+      document-intelligence:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: [runtime, secure, distributed, observability]
+
 volumes:
   backoffice-postgres-data:
+  backoffice-document-data:
+  clamav-signatures:
   prometheus-data:
   grafana-data:

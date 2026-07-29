@@ -19,7 +19,9 @@ RUN dotnet publish src/Backoffice.Api/Backoffice.Api.csproj -c Release --no-rest
 # load — matching design.md's open question on base-image choice for these native deps.
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 RUN groupadd --gid 10001 backoffice \
-    && useradd --uid 10001 --gid backoffice --shell /usr/sbin/nologin --no-create-home backoffice
+    && useradd --uid 10001 --gid backoffice --shell /usr/sbin/nologin --no-create-home backoffice \
+    && mkdir -p /var/lib/backoffice/documents \
+    && chown -R 10001:10001 /var/lib/backoffice
 WORKDIR /app
 COPY --from=build /app/publish .
 USER 10001:10001

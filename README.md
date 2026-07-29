@@ -34,6 +34,9 @@ A solução implementa uma jornada bancária de contestação com:
 - autorização externa com Open Policy Agent e comportamento `default deny`;
 - identidade por headers para desenvolvimento ou JWT EdDSA no perfil seguro;
 - upload real de PDF, PNG, JPEG, DOCX e XLSX;
+- armazenamento durável em volume, com zonas separadas de quarentena e aceitos;
+- malware scanning real com ClamAV antes de qualquer análise ou promoção;
+- processamento documental assíncrono, retomável e fail-closed;
 - serviço independente de Document Intelligence integrado à OpenAI;
 - abstention por limiar de confiança para evitar classificações forçadas;
 - human-in-the-loop e validação de alçada;
@@ -54,7 +57,10 @@ flowchart LR
 
     API --> OPA[Open Policy Agent]
     API --> DB[(PostgreSQL)]
-    API --> DI[DocumentIntelligence.Api]
+    API --> Quarantine[(Quarentena)]
+    Processor[Document Processor] --> Quarantine
+    Processor --> ClamAV[ClamAV]
+    Processor --> DI[DocumentIntelligence.Api]
     DI --> OpenAI[OpenAI API]
 
     API --> Outbox[(Transactional Outbox)]
@@ -88,7 +94,8 @@ flowchart LR
 | Policies | Open Policy Agent — OPA |
 | Eventing | Redpanda / Kafka e Confluent.Kafka |
 | IA documental | OpenAI SDK, tool calling e Open XML SDK |
-| Resiliência | Polly |
+| Resiliência | Polly, processamento retomável e promoção idempotente |
+| Segurança documental | Quarentena em volume e ClamAV |
 | Identidade | Headers locais ou JWT EdDSA |
 | Observabilidade | OpenTelemetry, Prometheus, Grafana e Jaeger |
 | Empacotamento | Docker e Docker Compose |
@@ -104,7 +111,7 @@ flowchart LR
 │   ├── Backoffice.Application/         # Use cases, handlers e ports
 │   ├── Backoffice.Infrastructure/      # EF Core, OPA, Kafka, JWT e observabilidade
 │   ├── Backoffice.Api/                 # API HTTP principal
-│   ├── Backoffice.Workers/             # Outbox, workflow e timers
+│   ├── Backoffice.Workers/             # Documentos, outbox, workflow e timers
 │   ├── Backoffice.Evals/               # Harness de avaliações determinísticas
 │   └── DocumentIntelligence.Api/       # Serviço independente de análise documental
 ├── tests/                               # Testes unitários, integração e contratos
@@ -166,8 +173,10 @@ Esse perfil inicia:
 
 - PostgreSQL;
 - OPA;
+- ClamAV;
 - Document Intelligence;
-- Backoffice API.
+- Backoffice API;
+- worker de processamento documental.
 
 ### 4. Validar a execução
 
@@ -214,10 +223,10 @@ A resposta contém `caseId`, `state` e `caseVersion`. O `caseVersion` deve ser e
 
 | Perfil | Objetivo | Serviços principais |
 |---|---|---|
-| `runtime` | Jornada síncrona mínima | API, PostgreSQL, OPA e Document Intelligence |
-| `distributed` | Eventing e processamento assíncrono | API, PostgreSQL, OPA, Redpanda e workers |
+| `runtime` | Jornada mínima | API, PostgreSQL, OPA, ClamAV, Document Intelligence e worker documental |
+| `distributed` | Eventing e processamento assíncrono | Runtime, Redpanda e workers especializados |
 | `observability` | Métricas, traces e dashboards | Runtime, Prometheus, Grafana, Jaeger e OTel Collector |
-| `secure` | Identidade JWT validada | API segura, PostgreSQL, OPA e Document Intelligence |
+| `secure` | Identidade JWT validada | API segura, PostgreSQL, OPA, ClamAV, Document Intelligence e worker documental |
 
 ### Runtime distribuído
 
@@ -230,6 +239,7 @@ Serviços adicionais:
 - `outbox-dispatcher`;
 - `workflow-worker`;
 - `timer-worker`;
+- `document-processor`;
 - tópicos `backoffice.events.v1` e `backoffice.dlq.v1`.
 
 ### Observabilidade
@@ -279,6 +289,13 @@ Configurações internas relevantes:
 ConnectionStrings__Backoffice
 Opa__BaseUrl
 DocumentIntelligence__BaseUrl
+DocumentStorage__RootPath
+DocumentStorage__MaxUploadBytes
+DocumentProcessing__Inline
+MalwareScan__Mode
+MalwareScan__ClamAv__Host
+MalwareScan__ClamAv__Port
+MalwareScan__ClamAv__TimeoutSeconds
 Identity__Mode
 Otel__Endpoint
 Kafka__BootstrapServers
@@ -325,7 +342,7 @@ Worker__Role
 
 | Método | Endpoint | Descrição |
 |---|---|---|
-| `POST` | `/v1/cases/{caseId}/documents` | Enviar e analisar documento |
+| `POST` | `/v1/cases/{caseId}/documents` | Armazenar documento em quarentena e agendar processamento |
 | `GET` | `/v1/cases/{caseId}/documents/{documentId}` | Consultar documento |
 | `GET` | `/v1/cases/{caseId}/evidence` | Listar evidências do caso |
 | `POST` | `/v1/documents/analyze` | Endpoint interno do Document Intelligence |
@@ -348,6 +365,17 @@ curl --request POST "http://localhost:8080/v1/cases/{caseId}/documents" \
   --form "mediaType=APPLICATION_PDF" \
   --form "file=@receipt.pdf;type=application/pdf"
 ```
+
+O endpoint responde `202 Accepted` depois de persistir o arquivo e os metadados, normalmente
+com status `QUARANTINED`. O `document-processor` retoma itens `QUARANTINED` ou `VALIDATING`,
+envia os bytes ao ClamAV e só então chama o Document Intelligence. Consulte
+`GET /v1/cases/{caseId}/documents/{documentId}` até um estado terminal:
+`VALIDATED`, `REVIEW_REQUIRED` ou `REJECTED`.
+
+Arquivos limpos são copiados de forma idempotente para a zona `accepted`; a cópia em
+quarentena fica disponível para uma futura política de retenção. Indisponibilidade,
+timeout ou resposta inesperada do scanner não libera o arquivo: ele permanece
+`VALIDATING` e é tentado novamente.
 
 ### Investigação, decisão e execução
 
@@ -393,6 +421,10 @@ O serviço `DocumentIntelligence.Api` é separado do domínio de contestação. 
 
 Controles implementados:
 
+- o arquivo permanece em quarentena até um resultado limpo do ClamAV;
+- checksum SHA-256 é calculado no servidor e verificado novamente antes do scan;
+- referências de storage são opacas e validadas contra path traversal;
+- uploads acima de 10 MiB são rejeitados antes da cópia em memória;
 - o conteúdo do documento é tratado como dado não confiável;
 - a resposta é estruturada por tool calling;
 - a única ferramenta permitida registra a análise;
@@ -436,6 +468,8 @@ O pipeline de CI executa restore, build, testes, evals determinísticos e valida
 - identidade de desenvolvimento separada do modo JWT;
 - JWT com issuer, audience e TTL máximo;
 - rejeição de headers de identidade quando há token validado;
+- quarentena durável e promoção somente após malware scan limpo;
+- falhas do scanner mantêm o documento bloqueado para nova tentativa;
 - trilha de auditoria com actor, correlation ID, causation ID e rule references;
 - abstention explícita para resultados de IA de baixa confiança;
 - DLQ e replay governado para falhas assíncronas.
@@ -448,8 +482,9 @@ O projeto demonstra capacidades executáveis localmente e no CI, mas ainda não 
 
 - identidade corporativa e gestão real de chaves;
 - secrets manager e rotação de credenciais;
-- blob storage real para documentos;
-- malware scanning real;
+- object storage gerenciado, criptografia/KMS, retenção e descarte da cópia em quarentena;
+- leasing distribuído antes de escalar o worker documental acima de uma réplica;
+- operação, atualização de assinaturas e alta disponibilidade do ClamAV;
 - integração com sistemas de registro;
 - testes E2E entre frontend, backend e dependências;
 - observabilidade e SLOs operados em ambiente real;
