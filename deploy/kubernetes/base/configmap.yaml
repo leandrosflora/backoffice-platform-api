@@ -1,7 +1,7 @@
 # Non-secret configuration only — ConnectionStrings__Backoffice (embeds the Postgres
 # password) is expected from a separately provisioned "intelligent-backoffice-runtime"
-# Secret, referenced by deployment.yaml's secretRef (matching how the reference
-# deploy/kubernetes/base/configmap.yaml keeps its own DB credential out of the ConfigMap).
+# Secret. OPENAI_API_KEY is expected as OpenAI__ApiKey in the separately provisioned
+# "intelligent-backoffice-document-intelligence" Secret.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,6 +9,7 @@ metadata:
   namespace: intelligent-backoffice
 data:
   Opa__BaseUrl: http://opa.platform.svc.cluster.local:8181
+  DocumentIntelligence__BaseUrl: http://intelligent-backoffice-document-intelligence:8080
   Identity__Mode: jwt
   Identity__Issuer: https://identity.corporate.example
   Identity__Audience: intelligent-backoffice-api
@@ -18,3 +19,5 @@ data:
   Kafka__EventsTopic: backoffice.events.v1
   Kafka__DlqTopic: backoffice.dlq.v1
   Kafka__ConsumerGroup: backoffice-workflow-v1
+  OpenAI__Model: gpt-4o
+  DocumentAnalysis__ConfidenceFloor: "0.7"

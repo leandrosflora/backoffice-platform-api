@@ -100,6 +100,100 @@ spec:
               - secret:
                   name: intelligent-backoffice-identity-trust
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intelligent-backoffice-document-intelligence
+  namespace: intelligent-backoffice
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+        app.kubernetes.io/part-of: intelligent-backoffice-platform
+    spec:
+      serviceAccountName: intelligent-backoffice-document-intelligence
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+      containers:
+        - name: document-intelligence
+          image: ghcr.io/leandrosflora/intelligent-backoffice-platform-document-intelligence@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: intelligent-backoffice-config
+            - secretRef:
+                name: intelligent-backoffice-document-intelligence
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
 # One Deployment per worker role (outbox dispatcher, workflow consumer, timer firing) from the
 # same image, differing only in the Worker__Role env var — mirroring the three-container split
 # in docker-compose.yml's distributed profile (spec: platform-deployment, task 12.1/12.3). Each

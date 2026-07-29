@@ -4,7 +4,7 @@
 # environment variable (see Program.cs) — matching the reference Python sample's pattern of
 # reusing one build for outbox-publisher/workflow-worker/timer-worker with a different
 # `command` per container (spec: platform-deployment, task 12.1).
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:ed034a8bf0b24ded0cbbac07e17825d8e9ebfe21e308191d0f7421eaf5ad4664 AS build
 WORKDIR /src
 
 COPY src/Backoffice.Workers/Backoffice.Workers.csproj src/Backoffice.Workers/
@@ -24,7 +24,7 @@ RUN dotnet publish src/Backoffice.Workers/Backoffice.Workers.csproj -c Release -
 # Backoffice.Infrastructure references OpenTelemetry's ASP.NET Core instrumentation package
 # (shared with the Api project), which pulls in a Microsoft.AspNetCore.App FrameworkReference
 # even though this worker process itself never listens on HTTP.
-FROM mcr.microsoft.com/dotnet/aspnet:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7
 RUN groupadd --gid 10001 backoffice \
     && useradd --uid 10001 --gid backoffice --shell /usr/sbin/nologin --no-create-home backoffice
 WORKDIR /app

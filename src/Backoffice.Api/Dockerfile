@@ -1,5 +1,5 @@
 # Build from the repository root: docker build -f src/Backoffice.Api/Dockerfile .
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:ed034a8bf0b24ded0cbbac07e17825d8e9ebfe21e308191d0f7421eaf5ad4664 AS build
 WORKDIR /src
 
 COPY src/Backoffice.Api/Backoffice.Api.csproj src/Backoffice.Api/
@@ -17,7 +17,7 @@ RUN dotnet publish src/Backoffice.Api/Backoffice.Api.csproj -c Release --no-rest
 # Debian-based (not chiseled/Alpine): NSec.Cryptography (libsodium) and Confluent.Kafka
 # (librdkafka) ship glibc-linked native binaries, which chiseled/musl-based images can't
 # load — matching design.md's open question on base-image choice for these native deps.
-FROM mcr.microsoft.com/dotnet/aspnet:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7
 RUN groupadd --gid 10001 backoffice \
     && useradd --uid 10001 --gid backoffice --shell /usr/sbin/nologin --no-create-home backoffice
 WORKDIR /app

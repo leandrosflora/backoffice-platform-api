@@ -1,11 +1,11 @@
 # Intelligent Backoffice Platform API
 
 [![CI](https://github.com/leandrosflora/backoffice-platform-api/actions/workflows/ci.yml/badge.svg)](https://github.com/leandrosflora/backoffice-platform-api/actions/workflows/ci.yml)
-[![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Architecture](https://img.shields.io/badge/architecture-executable_reference-blue)](https://github.com/leandrosflora/intelligent-backoffice-platform-architecture)
 [![Status](https://img.shields.io/badge/status-NOT_PRODUCTION_READY-orange)](#production-readiness)
 
-Backend executável em **ASP.NET Core / .NET 9** para uma plataforma inteligente de backoffice com gestão de casos, processamento documental com IA, autorização por policies, aprovação humana, execução governada, eventing confiável e observabilidade.
+Backend executável em **ASP.NET Core / .NET 10** para uma plataforma inteligente de backoffice com gestão de casos, processamento documental com IA, autorização por policies, aprovação humana, execução governada, eventing confiável e observabilidade.
 
 Este repositório implementa o backend de produto da arquitetura de referência [Intelligent Backoffice Platform Architecture](https://github.com/leandrosflora/intelligent-backoffice-platform-architecture).
 
@@ -44,7 +44,8 @@ A solução implementa uma jornada bancária de contestação com:
 - testes de domínio, aplicação, API, contratos, OPA, Kafka e IA;
 - evals determinísticos versionados com thresholds e guardrails;
 - imagens Docker e perfis de execução local;
-- manifests Kubernetes para a arquitetura alvo.
+- manifests Kubernetes para todos os runtimes da arquitetura alvo;
+- release de imagens com scan de vulnerabilidades, SBOM CycloneDX e proveniência assinada.
 
 ## Arquitetura
 
@@ -83,7 +84,7 @@ flowchart LR
 
 | Área | Tecnologia |
 |---|---|
-| Runtime | .NET 9 e ASP.NET Core Minimal APIs |
+| Runtime | .NET 10 e ASP.NET Core Minimal APIs |
 | Persistência | PostgreSQL 16, Entity Framework Core e Npgsql |
 | Policies | Open Policy Agent — OPA |
 | Eventing | Redpanda / Kafka e Confluent.Kafka |
@@ -119,7 +120,7 @@ flowchart LR
 - Git;
 - Docker com Docker Compose;
 - uma chave válida da OpenAI;
-- .NET SDK 9 para build e testes locais;
+- .NET SDK 10.0.302 ou patch compatível, conforme `global.json`, para build e testes locais;
 - OPA CLI e Docker daemon para executar a suíte completa de testes.
 
 O `docker-compose.yml` reutiliza policies e configurações de observabilidade do repositório de arquitetura. Por isso, mantenha os dois repositórios como diretórios irmãos:
@@ -459,7 +460,44 @@ A suíte cobre:
 - análise documental com fixtures gravadas;
 - abstention, grounding e thresholds de avaliação.
 
-O pipeline de CI executa restore, build, testes, evals determinísticos e validação das regras Prometheus.
+O pipeline de CI executa restore com auditoria NuGet, build, testes, evals
+determinísticos, renderização do Kustomize e validação das regras Prometheus. OPA,
+kubectl, promtool e todas as GitHub Actions usadas pelo CI são fixados por versão e
+checksum ou commit.
+
+## Kubernetes e supply chain
+
+A base em `deploy/kubernetes/base` inclui API, Document Intelligence e os três
+workers. Todos os pods executam sem root, sem privilege escalation, com seccomp
+`RuntimeDefault`, filesystem raiz somente leitura, recursos definidos e imagens
+referenciadas por digest. O namespace aplica o perfil Pod Security
+`restricted` da versão Kubernetes 1.36.
+
+Antes de aplicar a base, substitua os digests deliberadamente inválidos
+`sha256:1111...` pelos digests produzidos pelo workflow de release e provisione:
+
+- `intelligent-backoffice-runtime`, com a conexão PostgreSQL e demais segredos do runtime;
+- `intelligent-backoffice-identity-trust`, com a chave pública do perfil JWT;
+- `intelligent-backoffice-document-intelligence`, com `OpenAI__ApiKey`.
+
+Para validar a renderização:
+
+```bash
+kubectl kustomize deploy/kubernetes/base > /tmp/intelligent-backoffice.yaml
+```
+
+Uma tag Git `v*` aciona `.github/workflows/release-images.yml`. Para cada
+componente, o workflow:
+
+1. cria uma imagem candidata local;
+2. bloqueia vulnerabilidades `HIGH` e `CRITICAL` com Trivy;
+3. publica a imagem no GHCR;
+4. gera e preserva um SBOM CycloneDX;
+5. assina proveniência e SBOM via GitHub Artifact Attestations;
+6. anexa as attestations ao digest OCI no registry.
+
+As imagens base .NET e todas as actions também são fixadas por digest ou SHA.
+Atualizações desses pins devem passar por PR e pelo mesmo conjunto de testes.
 
 ## Segurança e governança
 
@@ -471,6 +509,9 @@ O pipeline de CI executa restore, build, testes, evals determinísticos e valida
 - identidade de desenvolvimento separada do modo JWT;
 - JWT com issuer, audience e TTL máximo;
 - rejeição de headers de identidade quando há token validado;
+- auditoria NuGet fail-closed para vulnerabilidades moderadas, altas e críticas;
+- workloads Kubernetes sob Pod Security `restricted` e NetworkPolicies;
+- imagens de release verificadas, acompanhadas de SBOM e proveniência assinada;
 - trilha de auditoria com actor, correlation ID, causation ID e rule references;
 - abstention explícita para resultados de IA de baixa confiança;
 - DLQ e replay governado para falhas assíncronas.
@@ -486,7 +527,6 @@ O projeto demonstra capacidades executáveis localmente e no CI, mas ainda não 
 - blob storage real para documentos;
 - malware scanning real;
 - integração com sistemas de registro;
-- testes E2E entre frontend, backend e dependências;
 - observabilidade e SLOs operados em ambiente real;
 - alta disponibilidade e disaster recovery validados;
 - threat modeling, pentest e hardening;
