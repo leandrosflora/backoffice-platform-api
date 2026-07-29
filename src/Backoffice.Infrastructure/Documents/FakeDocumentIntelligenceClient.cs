@@ -1,17 +1,15 @@
 using Backoffice.Application.Documents;
 
-namespace Backoffice.Api.Tests;
+namespace Backoffice.Infrastructure.Documents;
 
 /// <summary>
-/// Deterministic, filename-keyword-based stand-in for the real `document-analysis-service`
-/// HTTP client, registered in <see cref="BackofficeApiFactory"/> so this whole test project
-/// stays fast, free, and deterministic — the real AI/OCR integration is exercised separately
-/// in `DocumentIntelligence.Api.Tests` (recorded fixtures + an opt-in real-API smoke suite),
-/// not by making a paid network call on every test in this project that merely needs a
-/// document registered as setup. Mirrors the exact keyword logic the old (now removed)
-/// `Backoffice.Domain.Documents.DocumentClassifier` used, so every existing test's
-/// filename-driven expectations (e.g. "receipt-....pdf" classifies, "file-....pdf" abstains)
-/// keep working unchanged.
+/// Deterministic, filename-keyword-based stand-in for <see cref="HttpDocumentIntelligenceClient"/>,
+/// selected via <c>DocumentIntelligence:Mode=Fake</c> in <see cref="DependencyInjection.AddInfrastructureCore"/>
+/// (default remains the real HTTP client). Exists for local/CI environments — such as
+/// `intelligent-backoffice-frontend/e2e/docker-compose.yml` — that have no reachable
+/// document-analysis service and no OpenAI API key, so document registration would otherwise
+/// always abstain. Mirrors the exact keyword logic the old (removed)
+/// `Backoffice.Domain.Documents.DocumentClassifier` used.
 /// </summary>
 public sealed class FakeDocumentIntelligenceClient : IDocumentIntelligenceClient
 {

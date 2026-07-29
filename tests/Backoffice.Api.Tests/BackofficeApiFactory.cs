@@ -1,4 +1,5 @@
 using Backoffice.Application.Documents;
+using Backoffice.Infrastructure.Documents;
 using Backoffice.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
