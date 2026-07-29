@@ -32,7 +32,7 @@ A solução implementa uma jornada bancária de contestação com:
 - isolamento multi-tenant;
 - PostgreSQL com Entity Framework Core e migrations;
 - autorização externa com Open Policy Agent e comportamento `default deny`;
-- identidade por headers para desenvolvimento ou JWT EdDSA no perfil seguro;
+- identidade por headers para desenvolvimento, JWT EdDSA local ou OIDC/JWKS;
 - upload real de PDF, PNG, JPEG, DOCX e XLSX;
 - serviço independente de Document Intelligence integrado à OpenAI;
 - abstention por limiar de confiança para evitar classificações forçadas;
@@ -218,6 +218,7 @@ A resposta contém `caseId`, `state` e `caseVersion`. O `caseVersion` deve ser e
 | `distributed` | Eventing e processamento assíncrono | API, PostgreSQL, OPA, Redpanda e workers |
 | `observability` | Métricas, traces e dashboards | Runtime, Prometheus, Grafana, Jaeger e OTel Collector |
 | `secure` | Identidade JWT validada | API segura, PostgreSQL, OPA e Document Intelligence |
+| `oidc` | Access tokens de um IdP real | API com discovery/JWKS, PostgreSQL, OPA e Document Intelligence |
 
 ### Runtime distribuído
 
@@ -257,6 +258,24 @@ docker compose --profile secure up -d --build
 
 A API segura fica em `http://localhost:8082` e exige um JWT válido. Nesse modo, os headers de identidade informados pelo cliente não substituem as claims validadas do token.
 
+### Perfil OIDC/JWKS
+
+```bash
+OIDC_AUTHORITY=https://identity.example.com/realms/backoffice \
+OIDC_AUDIENCE=intelligent-backoffice-api \
+docker compose --profile oidc up -d --build
+```
+
+A API fica em `http://localhost:8083`. Ela consulta
+`/.well-known/openid-configuration`, usa somente as chaves publicadas no JWKS e
+solicita atualização do metadata quando encontra um `kid` desconhecido. HTTPS é
+obrigatório para discovery no profile Docker.
+
+O access token deve ser assinado com um algoritmo permitido e conter `iss`,
+`aud`, `sub`, `subject_type`, `tenant_id`, `roles`, `purpose`, `iat`, `exp` e
+`jti`. A claim `authority_limit` é opcional fora da aprovação; quando ausente em
+uma aprovação, a alçada é zero e a autorização falha fechada.
+
 ## Configuração principal
 
 | Variável | Padrão | Descrição |
@@ -265,6 +284,10 @@ A API segura fica em `http://localhost:8082` e exige um JWT válido. Nesse modo,
 | `OPENAI_MODEL` | `gpt-4o` | Modelo com suporte a visão e tool calling |
 | `APP_PORT` | `8080` | Porta da API no perfil runtime |
 | `SECURE_APP_PORT` | `8082` | Porta da API no perfil seguro |
+| `OIDC_APP_PORT` | `8083` | Porta da API no perfil OIDC |
+| `OIDC_AUTHORITY` | obrigatório no profile `oidc` | Authority que publica o metadata OIDC |
+| `OIDC_AUDIENCE` | `intelligent-backoffice-api` | Audience exigida no access token |
+| `OIDC_MAX_TTL_SECONDS` | `300` | TTL máximo aceito para o token |
 | `DISTRIBUTED_APP_PORT` | `8081` | Porta da API no perfil distribuído |
 | `DOCUMENT_INTELLIGENCE_PORT` | `8090` | Porta do serviço de análise documental |
 | `OPA_PORT` | `8181` | Porta do OPA |
@@ -280,6 +303,13 @@ ConnectionStrings__Backoffice
 Opa__BaseUrl
 DocumentIntelligence__BaseUrl
 Identity__Mode
+Identity__PublicKeyPath
+Identity__Authority
+Identity__MetadataAddress
+Identity__Audience
+Identity__AllowedAlgorithms
+Identity__RequireHttpsMetadata
+Identity__MaxTtlSeconds
 Otel__Endpoint
 Kafka__BootstrapServers
 Kafka__EventsTopic
@@ -299,8 +329,13 @@ Worker__Role
 | `X-Correlation-Id` | Correlação ponta a ponta; um UUID é criado quando ausente |
 | `If-Match` | Versão esperada do caso para operações concorrentes |
 | `Idempotency-Key` | Obrigatório para solicitar execução governada |
-| `X-Authority-Limit` | Alçada do aprovador no modo de desenvolvimento por headers |
+| `X-Authority-Limit` | Alçada somente no modo de desenvolvimento por headers; ignorado em JWT |
 | `Authorization` | Bearer token no perfil JWT |
+
+No profile JWT/OIDC, tenant, sujeito, tipo, papéis, propósito e alçada vêm
+exclusivamente das claims assinadas. O backend também vincula a claim `purpose`
+à finalidade da ação antes de consultar o PDP; um token de aprovação, por
+exemplo, não pode ser reutilizado para criar casos.
 
 ## Superfície HTTP
 

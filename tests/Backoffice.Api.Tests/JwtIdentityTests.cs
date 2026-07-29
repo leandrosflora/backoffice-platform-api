@@ -1,12 +1,18 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Backoffice.Application.Cases;
 using Backoffice.Domain.Cases;
 using Backoffice.Infrastructure.Identity;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Backoffice.Api.Tests;
 
@@ -62,6 +68,40 @@ public class JwtIdentityTests(BackofficeApiFactory factory) : IClassFixture<Back
             "/v1/cases",
             new CreateCaseRequest("ext-jwt-1", DisputeType.CardPurchase, Channel.App, Priority.Normal, new MoneyDto("BRL", "150.00")),
             JsonOptions);
+
+    private static OpenIdConnectConfiguration OidcConfiguration(string issuer, SecurityKey signingKey)
+    {
+        var configuration = new OpenIdConnectConfiguration { Issuer = issuer };
+        configuration.SigningKeys.Add(signingKey);
+        return configuration;
+    }
+
+    private static string CreateRsaToken(
+        RsaSecurityKey signingKey,
+        string issuer,
+        string audience,
+        string subject = "oidc-user",
+        string purpose = "CASE_MANAGEMENT")
+    {
+        var now = DateTime.UtcNow;
+        return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = issuer,
+            Audience = audience,
+            IssuedAt = now,
+            Expires = now.AddMinutes(2),
+            SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256),
+            Claims = new Dictionary<string, object>
+            {
+                ["sub"] = subject,
+                ["subject_type"] = "HUMAN",
+                ["tenant_id"] = "tenant-oidc",
+                ["roles"] = new[] { "case-manager" },
+                ["purpose"] = purpose,
+                ["jti"] = Guid.NewGuid().ToString(),
+            },
+        });
+    }
 
     [Fact]
     public async Task ValidToken_IsAcceptedAndDerivesIdentityFromClaims()
@@ -201,5 +241,134 @@ public class JwtIdentityTests(BackofficeApiFactory factory) : IClassFixture<Back
         // The case was created under the JWT's tenant, not the spoofed header's tenant —
         // proving the headers had zero effect on the resolved identity.
         Assert.Equal("tenant-jwt-real", body!.TenantId);
+    }
+
+    [Fact]
+    public async Task AuthorityLimit_IsDerivedFromSignedClaimAndSpoofedHeaderIsIgnored()
+    {
+        var keys = GenerateKeyPair();
+        var token = DevIdentityGenerator.CreateToken(
+            keys.PrivateKeyPath, Issuer, Audience, subject: "approver-claim", subjectType: "HUMAN",
+            tenantId: "tenant-authority", roles: ["approver"], purpose: "APPROVAL",
+            authorityLimit: 750.50m);
+        var validator = new JwtIdentityValidator(Options.Create(new IdentityOptions
+        {
+            PublicKeyPath = keys.PublicKeyPath,
+            Issuer = Issuer,
+            Audience = Audience,
+            MaxTtlSeconds = 300,
+        }));
+
+        var identity = await validator.ValidateAsync(token);
+        var context = new DefaultHttpContext();
+        context.Items["ResolvedIdentity"] = identity;
+        context.Request.Headers[RequestContext.AuthorityLimitHeader] = "999999.00";
+
+        Assert.Equal(750.50m, identity.AuthorityLimit);
+        Assert.Equal(750.50m, RequestContext.GetAuthorityLimit(context.Request));
+    }
+
+    [Fact]
+    public async Task MissingAuthorityClaim_FailsClosedAndNegativeClaimIsRejected()
+    {
+        var keys = GenerateKeyPair();
+        var validator = new JwtIdentityValidator(Options.Create(new IdentityOptions
+        {
+            PublicKeyPath = keys.PublicKeyPath,
+            Issuer = Issuer,
+            Audience = Audience,
+            MaxTtlSeconds = 300,
+        }));
+        var tokenWithoutLimit = DevIdentityGenerator.CreateToken(
+            keys.PrivateKeyPath, Issuer, Audience, subject: "approver-no-limit", subjectType: "HUMAN",
+            tenantId: "tenant-authority", roles: ["approver"], purpose: "APPROVAL");
+        var identity = await validator.ValidateAsync(tokenWithoutLimit);
+        var context = new DefaultHttpContext();
+        context.Items["ResolvedIdentity"] = identity;
+
+        Assert.Null(identity.AuthorityLimit);
+        Assert.Equal(0m, RequestContext.GetAuthorityLimit(context.Request));
+
+        var tokenWithNegativeLimit = DevIdentityGenerator.CreateToken(
+            keys.PrivateKeyPath, Issuer, Audience, subject: "approver-negative", subjectType: "HUMAN",
+            tenantId: "tenant-authority", roles: ["approver"], purpose: "APPROVAL",
+            authorityLimit: -1m);
+        var exception = await Assert.ThrowsAsync<JwtValidationException>(
+            () => validator.ValidateAsync(tokenWithNegativeLimit));
+        Assert.Equal("invalid-authority-limit", exception.Reason);
+    }
+
+    [Fact]
+    public async Task OidcConfiguration_ValidatesStandardRsaAccessToken()
+    {
+        using var rsa = RSA.Create(2048);
+        var key = new RsaSecurityKey(rsa) { KeyId = "oidc-key-1" };
+        const string oidcIssuer = "https://issuer.example.test";
+        var configurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(
+            OidcConfiguration(oidcIssuer, key));
+        var validator = new JwtIdentityValidator(
+            Options.Create(new IdentityOptions
+            {
+                Audience = Audience,
+                AllowedAlgorithms = [SecurityAlgorithms.RsaSha256],
+                MaxTtlSeconds = 300,
+            }),
+            configurationManager);
+
+        var identity = await validator.ValidateAsync(CreateRsaToken(key, oidcIssuer, Audience));
+
+        Assert.Equal("oidc-user", identity.ActorId);
+        Assert.Equal("tenant-oidc", identity.TenantId);
+        Assert.Equal("CASE_MANAGEMENT", identity.Purpose);
+        Assert.Equal("SIGNED_JWT", identity.AuthenticationMethod);
+    }
+
+    [Fact]
+    public async Task OidcUnknownKid_RefreshesConfigurationAndAcceptsRotatedKey()
+    {
+        using var oldRsa = RSA.Create(2048);
+        using var newRsa = RSA.Create(2048);
+        var oldKey = new RsaSecurityKey(oldRsa) { KeyId = "old-key" };
+        var newKey = new RsaSecurityKey(newRsa) { KeyId = "rotated-key" };
+        const string oidcIssuer = "https://issuer.example.test";
+        var configurationManager = new RotatingConfigurationManager(
+            OidcConfiguration(oidcIssuer, oldKey),
+            OidcConfiguration(oidcIssuer, newKey));
+        var validator = new JwtIdentityValidator(
+            Options.Create(new IdentityOptions
+            {
+                Audience = Audience,
+                AllowedAlgorithms = [SecurityAlgorithms.RsaSha256],
+                MaxTtlSeconds = 300,
+            }),
+            configurationManager);
+
+        var identity = await validator.ValidateAsync(
+            CreateRsaToken(newKey, oidcIssuer, Audience, subject: "rotated-user"));
+
+        Assert.Equal("rotated-user", identity.ActorId);
+        Assert.Equal(1, configurationManager.RefreshCount);
+        Assert.Equal(2, configurationManager.GetConfigurationCount);
+    }
+
+    private sealed class RotatingConfigurationManager(
+        OpenIdConnectConfiguration initial,
+        OpenIdConnectConfiguration rotated) : IConfigurationManager<OpenIdConnectConfiguration>
+    {
+        private bool _refreshRequested;
+        public int RefreshCount { get; private set; }
+        public int GetConfigurationCount { get; private set; }
+
+        public Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
+        {
+            GetConfigurationCount++;
+            return Task.FromResult(_refreshRequested ? rotated : initial);
+        }
+
+        public void RequestRefresh()
+        {
+            RefreshCount++;
+            _refreshRequested = true;
+        }
     }
 }

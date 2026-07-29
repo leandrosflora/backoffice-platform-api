@@ -44,7 +44,7 @@ builder.Services.AddEventingGauges();
 
 // Secure/jwt profile (spec: identity-security). IJwtIdentityValidator is registered as a
 // singleton but constructed lazily — the middleware only resolves it inside the jwt-mode
-// branch, so a default "headers" profile app never needs Identity:PublicKeyPath configured.
+// branch, so the headers profile needs neither a local key nor OIDC discovery configured.
 builder.Services.Configure<IdentityOptions>(builder.Configuration.GetSection("Identity"));
 builder.Services.AddSingleton<IJwtIdentityValidator, JwtIdentityValidator>();
 builder.Services.AddHttpContextAccessor();

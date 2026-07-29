@@ -1,18 +1,21 @@
+using System.Globalization;
+using System.Text.Json;
 using Backoffice.Application.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Backoffice.Infrastructure.Identity;
 
 /// <summary>
-/// Validates a bearer JWT against the claim set and TTL rules in
-/// docs/security/workload-identity.md (spec: identity-security, "Short-TTL EdDSA JWT
-/// validation" / "Subject type and purpose validation"). Signature verification runs
-/// through the standard `JsonWebTokenHandler` pipeline via <see cref="EdDsaSecurityKey"/>;
-/// everything else (required-claims presence, TTL ≤ configured max, subject_type/purpose
-/// whitelist) is checked explicitly here, matching the Python reference's `_jwt_context`
-/// exactly rather than relying on the library's more generic validation.
+/// Validates short-lived bearer JWTs either with the local Ed25519 development key or with
+/// OIDC discovery/JWKS. Discovery mode follows issuer metadata, caches signing keys through
+/// ConfigurationManager and requests an immediate metadata refresh after an unknown-kid
+/// failure, which supports normal provider key rotation without accepting caller keys.
+/// Domain claims and the maximum token TTL are validated explicitly after cryptographic
+/// validation.
 /// </summary>
 public sealed class JwtIdentityValidator : IJwtIdentityValidator
 {
@@ -22,45 +25,116 @@ public sealed class JwtIdentityValidator : IJwtIdentityValidator
         ["iss", "aud", "sub", "subject_type", "tenant_id", "roles", "purpose", "iat", "exp", "jti"];
 
     private readonly IdentityOptions _options;
-    private readonly EdDsaSecurityKey _signingKey;
+    private readonly EdDsaSecurityKey? _localSigningKey;
+    private readonly IConfigurationManager<OpenIdConnectConfiguration>? _configurationManager;
     private readonly JsonWebTokenHandler _handler = new();
 
     public JwtIdentityValidator(IOptions<IdentityOptions> options)
+        : this(options, configurationManager: null)
     {
-        _options = options.Value;
-        _signingKey = new EdDsaSecurityKey(EdDsaKeyLoader.LoadPublicKey(_options.PublicKeyPath));
     }
 
-    public ResolvedIdentity Validate(string bearerToken)
+    public JwtIdentityValidator(
+        IOptions<IdentityOptions> options,
+        IConfigurationManager<OpenIdConnectConfiguration>? configurationManager)
     {
-        var validationParameters = new TokenValidationParameters
-        {
-            ValidIssuer = _options.Issuer,
-            ValidAudience = _options.Audience,
-            IssuerSigningKey = _signingKey,
-            ValidAlgorithms = [SecurityAlgorithms.EdDsa],
-            RequireSignedTokens = true,
-            RequireExpirationTime = true,
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero,
-            // TokenValidationParameters has its own CryptoProviderFactory (defaulting to the
-            // global CryptoProviderFactory.Default, which knows nothing about "EdDSA") that
-            // otherwise takes precedence over the signing key's own factory during
-            // signature verification — without this, verification silently uses the wrong
-            // factory and every token, valid or not, fails signature validation.
-            CryptoProviderFactory = _signingKey.CryptoProviderFactory,
-        };
+        _options = options.Value;
 
-        TokenValidationResult result;
+        if (!string.IsNullOrWhiteSpace(_options.PublicKeyPath))
+        {
+            _localSigningKey = new EdDsaSecurityKey(EdDsaKeyLoader.LoadPublicKey(_options.PublicKeyPath));
+            return;
+        }
+
+        if (configurationManager is not null)
+        {
+            _configurationManager = configurationManager;
+            return;
+        }
+
+        var metadataAddress = ResolveMetadataAddress(_options);
+        var documentRetriever = new HttpDocumentRetriever { RequireHttps = _options.RequireHttpsMetadata };
+        _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+            metadataAddress,
+            new OpenIdConnectConfigurationRetriever(),
+            documentRetriever);
+    }
+
+    public async Task<ResolvedIdentity> ValidateAsync(
+        string bearerToken,
+        CancellationToken cancellationToken = default)
+    {
         try
         {
-            result = _handler.ValidateTokenAsync(bearerToken, validationParameters).GetAwaiter().GetResult();
+            if (_localSigningKey is not null)
+            {
+                var localResult = await _handler.ValidateTokenAsync(
+                    bearerToken,
+                    CreateLocalValidationParameters());
+                return ResolveIdentity(localResult);
+            }
+
+            var configuration = await _configurationManager!.GetConfigurationAsync(cancellationToken);
+            var result = await _handler.ValidateTokenAsync(
+                bearerToken,
+                CreateOidcValidationParameters(configuration));
+
+            if (!result.IsValid && IsUnknownSigningKey(result.Exception))
+            {
+                _configurationManager.RequestRefresh();
+                configuration = await _configurationManager.GetConfigurationAsync(cancellationToken);
+                result = await _handler.ValidateTokenAsync(
+                    bearerToken,
+                    CreateOidcValidationParameters(configuration));
+            }
+
+            return ResolveIdentity(result);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (JwtValidationException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
             throw new JwtValidationException("invalid-workload-token", exception);
         }
+    }
 
+    private TokenValidationParameters CreateLocalValidationParameters() =>
+        new()
+        {
+            ValidIssuer = _options.Issuer,
+            ValidAudience = _options.Audience,
+            IssuerSigningKey = _localSigningKey,
+            ValidAlgorithms = [SecurityAlgorithms.EdDsa],
+            ValidateIssuerSigningKey = true,
+            RequireSignedTokens = true,
+            RequireExpirationTime = true,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero,
+            CryptoProviderFactory = _localSigningKey!.CryptoProviderFactory,
+        };
+
+    private TokenValidationParameters CreateOidcValidationParameters(OpenIdConnectConfiguration configuration) =>
+        new()
+        {
+            ValidIssuer = configuration.Issuer,
+            ValidAudience = _options.Audience,
+            IssuerSigningKeys = configuration.SigningKeys,
+            ValidAlgorithms = _options.AllowedAlgorithms,
+            ValidateIssuerSigningKey = true,
+            RequireSignedTokens = true,
+            RequireExpirationTime = true,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero,
+        };
+
+    private ResolvedIdentity ResolveIdentity(TokenValidationResult result)
+    {
         if (!result.IsValid || result.SecurityToken is not JsonWebToken token)
         {
             throw new JwtValidationException("invalid-workload-token", result.Exception);
@@ -74,7 +148,8 @@ public sealed class JwtIdentityValidator : IJwtIdentityValidator
             }
         }
 
-        if (!token.TryGetPayloadValue<long>("iat", out var issuedAt) || !token.TryGetPayloadValue<long>("exp", out var expiresAt))
+        if (!token.TryGetPayloadValue<long>("iat", out var issuedAt)
+            || !token.TryGetPayloadValue<long>("exp", out var expiresAt))
         {
             throw new JwtValidationException("invalid-token-ttl");
         }
@@ -97,7 +172,8 @@ public sealed class JwtIdentityValidator : IJwtIdentityValidator
             throw new JwtValidationException("invalid-purpose");
         }
 
-        if (!token.TryGetPayloadValue<string[]>("roles", out var roles) || roles.Length == 0 || roles.Any(string.IsNullOrWhiteSpace))
+        var roles = ReadRoles(token);
+        if (roles.Length == 0 || roles.Any(string.IsNullOrWhiteSpace))
         {
             throw new JwtValidationException("invalid-roles");
         }
@@ -108,12 +184,75 @@ public sealed class JwtIdentityValidator : IJwtIdentityValidator
             throw new JwtValidationException("invalid-token-context");
         }
 
+        var authorityLimit = ReadAuthorityLimit(token);
+        if (authorityLimit < 0)
+        {
+            throw new JwtValidationException("invalid-authority-limit");
+        }
+
         return new ResolvedIdentity(
             ActorId: token.GetPayloadValue<string>("sub"),
             SubjectType: subjectType,
             Roles: roles,
             TenantId: tenantId,
             AuthenticationMethod: "SIGNED_JWT",
-            TokenId: token.GetPayloadValue<string>("jti"));
+            TokenId: token.GetPayloadValue<string>("jti"),
+            Purpose: purpose,
+            AuthorityLimit: authorityLimit);
+    }
+
+    private static string[] ReadRoles(JsonWebToken token)
+    {
+        if (token.TryGetPayloadValue<string[]>("roles", out var arrayRoles))
+        {
+            return arrayRoles;
+        }
+
+        return token.TryGetPayloadValue<string>("roles", out var stringRoles)
+            ? stringRoles.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+    }
+
+    private static decimal? ReadAuthorityLimit(JsonWebToken token)
+    {
+        if (!token.TryGetPayloadValue<object>("authority_limit", out var rawValue))
+        {
+            return null;
+        }
+
+        var parsed = rawValue switch
+        {
+            decimal value => value,
+            long value => value,
+            int value => value,
+            double value when double.IsFinite(value) => Convert.ToDecimal(value),
+            string value when decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number) => number,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetDecimal(out var number) => number,
+            JsonElement { ValueKind: JsonValueKind.String } element
+                when decimal.TryParse(element.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var number) => number,
+            _ => throw new JwtValidationException("invalid-authority-limit"),
+        };
+
+        return parsed;
+    }
+
+    private static bool IsUnknownSigningKey(Exception? exception) =>
+        exception is SecurityTokenSignatureKeyNotFoundException
+        || exception?.InnerException is SecurityTokenSignatureKeyNotFoundException;
+
+    private static string ResolveMetadataAddress(IdentityOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.MetadataAddress))
+        {
+            return options.MetadataAddress;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Authority))
+        {
+            return $"{options.Authority.TrimEnd('/')}/.well-known/openid-configuration";
+        }
+
+        throw new InvalidOperationException(
+            "JWT mode requires Identity:PublicKeyPath or Identity:Authority/MetadataAddress.");
     }
 }

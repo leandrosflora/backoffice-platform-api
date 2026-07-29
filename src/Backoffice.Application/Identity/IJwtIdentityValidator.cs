@@ -14,5 +14,5 @@ public interface IJwtIdentityValidator
 {
     /// <summary>Validates a raw bearer token (without the "Bearer " prefix) and returns the
     /// resolved identity, or throws <see cref="JwtValidationException"/>.</summary>
-    ResolvedIdentity Validate(string bearerToken);
+    Task<ResolvedIdentity> ValidateAsync(string bearerToken, CancellationToken cancellationToken = default);
 }

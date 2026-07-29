@@ -43,6 +43,10 @@ public sealed class PolicyEnforcer(IPolicyDecisionClient client, ICallerIdentity
         if (callerIdentity.IdentityMode == "jwt")
         {
             input.Context["identity_mode"] = "jwt";
+            if (!PurposeMatches(callerIdentity.Purpose, input.Purpose))
+            {
+                throw new PolicyDeniedException("token-purpose-mismatch");
+            }
         }
 
         using var activity = BackofficeActivitySource.Instance.StartActivity("policy.evaluate");
@@ -80,4 +84,15 @@ public sealed class PolicyEnforcer(IPolicyDecisionClient client, ICallerIdentity
 
         return decision;
     }
+
+    private static bool PurposeMatches(string? tokenPurpose, string requestedPurpose) =>
+        (tokenPurpose, requestedPurpose) switch
+        {
+            ("CASE_MANAGEMENT", PolicyPurposes.CaseProcessing) => true,
+            ("OPERATIONS", PolicyPurposes.Operations) => true,
+            ("AUDIT", PolicyPurposes.Audit) => true,
+            ("EXECUTION", PolicyPurposes.Execution) => true,
+            ("APPROVAL", PolicyPurposes.Approval) => true,
+            _ => false,
+        };
 }
