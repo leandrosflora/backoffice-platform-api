@@ -22,13 +22,30 @@ public class AsyncApiContractTests
         return deserializer.Deserialize<Dictionary<object, object>>(yaml);
     }
 
-    private static HashSet<string> ReadChannelAddresses()
+    private static Dictionary<string, string> ReadChannelAddressesByName()
     {
         var document = ReadPlatformEvents();
         var channels = (Dictionary<object, object>)document["channels"];
-        return channels.Values
+        return channels.ToDictionary(
+            pair => (string)pair.Key,
+            pair => (string)((Dictionary<object, object>)pair.Value)["address"]);
+    }
+
+    private static HashSet<string> ReadChannelAddresses() =>
+        ReadChannelAddressesByName().Values.ToHashSet();
+
+    private static HashSet<string> ReadSentChannelAddresses()
+    {
+        var document = ReadPlatformEvents();
+        var operations = (Dictionary<object, object>)document["operations"];
+        var addressesByName = ReadChannelAddressesByName();
+
+        return operations.Values
             .Cast<Dictionary<object, object>>()
-            .Select(channel => (string)channel["address"])
+            .Where(operation => (string)operation["action"] == "send")
+            .Select(operation => (Dictionary<object, object>)operation["channel"])
+            .Select(channel => ((string)channel["$ref"]).Split('/').Last())
+            .Select(channelName => addressesByName[channelName])
             .ToHashSet();
     }
 
@@ -45,12 +62,12 @@ public class AsyncApiContractTests
     [InlineData(nameof(EventTypes.ExecutionCompleted))]
     [InlineData(nameof(EventTypes.ExecutionFailed))]
     [InlineData(nameof(EventTypes.ReconciliationRequired))]
-    public void EventTypes_Constant_MatchesADeclaredChannelAddress(string constantName)
+    public void EventTypes_Constant_MatchesADeclaredSendOperation(string constantName)
     {
         var value = (string)typeof(EventTypes).GetField(constantName)!.GetValue(null)!;
-        var addresses = ReadChannelAddresses();
 
-        Assert.Contains(value, addresses);
+        Assert.Contains(value, ReadChannelAddresses());
+        Assert.Contains(value, ReadSentChannelAddresses());
     }
 
     /// <summary>
