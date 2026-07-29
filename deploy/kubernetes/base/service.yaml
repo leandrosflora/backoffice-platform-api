@@ -12,3 +12,17 @@ spec:
       port: 80
       targetPort: http
   type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: intelligent-backoffice-document-intelligence
+  namespace: intelligent-backoffice
+spec:
+  selector:
+    app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  type: ClusterIP

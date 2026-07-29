@@ -3,7 +3,11 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -12,29 +16,37 @@ jobs:
   build-test-eval:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout backend
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The eval harness and OPA test fixture locate the sibling
-          # intelligent-backoffice-platform-architecture checkout by walking up from
-          # AppContext.BaseDirectory — both repos must be checked out side by side.
+          # The eval harness and OPA test fixture locate the sibling architecture
+          # checkout by walking up from AppContext.BaseDirectory.
           path: intelligent-backoffice-platform
 
-      - uses: actions/checkout@v4
+      - name: Checkout architecture contracts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/intelligent-backoffice-platform-architecture
           path: intelligent-backoffice-platform-architecture
 
-      - uses: actions/setup-dotnet@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "9.0.x"
+          global-json-file: intelligent-backoffice-platform/global.json
 
-      - name: Install OPA
+      - name: Install verified OPA
+        shell: bash
         run: |
-          curl -L -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
-          chmod +x /usr/local/bin/opa
-          echo "OPA_EXECUTABLE=/usr/local/bin/opa" >> "$GITHUB_ENV"
+          OPA_PATH="$RUNNER_TEMP/opa"
+          curl --fail --location --silent --show-error \
+            --output "$OPA_PATH" \
+            https://github.com/open-policy-agent/opa/releases/download/v1.18.2/opa_linux_amd64_static
+          echo "9903e5125ac281104f2c4b7371d10cc3b74a98933743fcbfc174f9bf0ab20de8  $OPA_PATH" \
+            | sha256sum --check
+          chmod +x "$OPA_PATH"
+          echo "OPA_EXECUTABLE=$OPA_PATH" >> "$GITHUB_ENV"
 
-      - name: Restore
+      - name: Restore and audit dependencies
         working-directory: intelligent-backoffice-platform
         run: dotnet restore
 
@@ -44,22 +56,39 @@ jobs:
 
       - name: Test
         working-directory: intelligent-backoffice-platform
-        # Backoffice.Api.Tests runs a real OPA subprocess (see OPA_EXECUTABLE above);
-        # Backoffice.Workers.Tests starts a real Kafka broker via the Docker daemon already
-        # available on GitHub-hosted runners — neither is mocked (spec: policy-authorization,
-        # eventing-reliability).
+        # Backoffice.Api.Tests runs a real OPA subprocess. Backoffice.Workers.Tests
+        # starts a real Kafka broker via the Docker daemon on the hosted runner.
         run: dotnet test --no-build --configuration Release
 
       - name: Run deterministic evaluation harness
         working-directory: intelligent-backoffice-platform
-        # Fails the build (non-zero exit) on any evals/thresholds.yaml miss (spec:
-        # observability-evaluation, "Deterministic evaluation harness").
         run: dotnet run --project src/Backoffice.Evals --configuration Release --no-build
 
-      - name: Validate Prometheus alert/recording rules
+      - name: Render Kubernetes base
+        shell: bash
         run: |
-          docker run --rm \
-            -v "$PWD/intelligent-backoffice-platform-architecture/observability/prometheus:/rules:ro" \
-            --entrypoint promtool \
-            prom/prometheus:v2.53.1 \
-            check rules /rules/alerts.yml /rules/recording-rules.yml
+          KUBECTL_PATH="$RUNNER_TEMP/kubectl"
+          RENDERED_PATH="$RUNNER_TEMP/intelligent-backoffice-kubernetes.yaml"
+          curl --fail --location --silent --show-error \
+            --output "$KUBECTL_PATH" \
+            https://dl.k8s.io/release/v1.36.3/bin/linux/amd64/kubectl
+          echo "ebbd080e7c2e275093b55915722043257eb24004363e20acb3c4d71919f88336  $KUBECTL_PATH" \
+            | sha256sum --check
+          chmod +x "$KUBECTL_PATH"
+          "$KUBECTL_PATH" kustomize intelligent-backoffice-platform/deploy/kubernetes/base \
+            > "$RENDERED_PATH"
+          test -s "$RENDERED_PATH"
+
+      - name: Validate Prometheus alert and recording rules
+        shell: bash
+        run: |
+          PROMETHEUS_ARCHIVE="$RUNNER_TEMP/prometheus-3.13.1.linux-amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$PROMETHEUS_ARCHIVE" \
+            https://github.com/prometheus/prometheus/releases/download/v3.13.1/prometheus-3.13.1.linux-amd64.tar.gz
+          echo "962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103  $PROMETHEUS_ARCHIVE" \
+            | sha256sum --check
+          tar --extract --gzip --file "$PROMETHEUS_ARCHIVE" --directory "$RUNNER_TEMP"
+          "$RUNNER_TEMP/prometheus-3.13.1.linux-amd64/promtool" check rules \
+            intelligent-backoffice-platform-architecture/observability/prometheus/alerts.yml \
+            intelligent-backoffice-platform-architecture/observability/prometheus/recording-rules.yml

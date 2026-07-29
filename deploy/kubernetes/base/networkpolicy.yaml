@@ -18,6 +18,13 @@ spec:
           port: 8080
   egress:
     - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform
@@ -37,6 +44,47 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: intelligent-backoffice-document-intelligence
+  namespace: intelligent-backoffice
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: intelligent-backoffice-document-intelligence
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: intelligent-backoffice-api
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Baseline for the public OpenAI API. Production environments should route this
+    # through an egress gateway or replace it with the approved private endpoint CIDR.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
 ---
 # Workers never serve inbound traffic (no Ingress rule => default-deny ingress); they only need
 # the same egress as the Api to Kafka/Postgres/OPA plus DNS.
