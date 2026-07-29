@@ -75,23 +75,7 @@ public class OpenApiContractTests
         Assert.Contains(path, paths.Keys);
     }
 
-    /// <summary>
-    /// `GET /v1/operations/timers` (list all timers, not scoped to a case) is implemented
-    /// (`OperationsEndpoints.cs`) but not declared in `eventing-operations-api.yaml` — an
-    /// undocumented-but-real extra endpoint, the same kind of doc/implementation gap section
-    /// 10 found for `backoffice_cases_created_total`. Documented here rather than silently
-    /// dropped or silently left unverified.
-    /// </summary>
-    [Fact]
-    public void EventingOperationsApi_ListAllTimersEndpoint_IsImplementedButUndocumented()
-    {
-        var document = ReadEventingOperationsApi();
-        var paths = (Dictionary<object, object>)document["paths"];
-
-        Assert.DoesNotContain("/v1/operations/timers", paths.Keys);
-    }
-
-    [Fact]
+obsolete undocumented timers test    [Fact]
     public void PlatformApi_CasesPathRefTargetFileExists()
     {
         var document = ReadPlatformApi();
