@@ -73,26 +73,31 @@ public sealed class RegisterDocumentHandler(
 
         document.ClearQuarantine();
 
-        // Real AI/OCR classification+extraction, replacing the old deterministic keyword
-        // matcher (spec: document-intelligence, "AI-driven document classification"). The
-        // service classifies independently of the client's declared type; only a real,
-        // non-abstained match against what the client declared corroborates it as evidence —
-        // an abstention or a mismatched classification yields no evidence, exactly like the
-        // old classifier's "no keyword match" case (spec: document-intelligence, "abstains
-        // instead of guessing").
+        // The intelligence service classifies independently of the client's declared type.
+        // Only a non-abstained match corroborates the declaration as evidence. Abstention or
+        // disagreement must be handled by a human and cannot satisfy the case's document rules.
         var analysis = await documentIntelligenceClient.AnalyzeAsync(
             request.FileContent, request.FileName, request.MediaType.ToMimeType(), cancellationToken);
-        if (!analysis.Abstained && analysis.DocumentType == request.DocumentType.ToWireString())
+        var analysisMatchesDeclaredType = !analysis.Abstained
+            && string.Equals(
+                analysis.DocumentType,
+                request.DocumentType.ToWireString(),
+                StringComparison.OrdinalIgnoreCase);
+
+        if (analysisMatchesDeclaredType)
         {
             evidenceRepository.Add(EvidenceRecord.Create(
                 caseId, tenantId, EvidenceType.ExtractedField, EvidenceSourceType.Document,
                 document.DocumentId.ToString(), document.Version.ToString(), analysis.Confidence,
                 value: request.DocumentType.ToString(), checksum: document.Checksum, now: clock.UtcNow));
+            document.MarkValidated();
+        }
+        else
+        {
+            document.RequireReview();
         }
 
-        document.MarkValidated();
-
-        if (@case.State == CaseState.DocumentsReceived)
+        if (@case.State == CaseState.DocumentsReceived && document.Status == DocumentStatus.Validated)
         {
             var validatedTypes = (await documentRepository.ListByCaseAsync(tenantId, caseId, cancellationToken))
                 .Where(d => d.Status == DocumentStatus.Validated)

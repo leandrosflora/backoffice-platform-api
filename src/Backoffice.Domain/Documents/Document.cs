@@ -69,6 +69,16 @@ public sealed class Document
         Status = DocumentStatus.Validated;
     }
 
+    public void RequireReview()
+    {
+        if (Status != DocumentStatus.Validating)
+        {
+            throw new InvalidDocumentTransitionException(Status, DocumentStatus.ReviewRequired);
+        }
+
+        Status = DocumentStatus.ReviewRequired;
+    }
+
     public void Reject(IEnumerable<string> reasons)
     {
         if (Status is not (DocumentStatus.Quarantined or DocumentStatus.Validating))
