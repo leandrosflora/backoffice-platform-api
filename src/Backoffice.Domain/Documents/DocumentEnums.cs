@@ -41,4 +41,5 @@ public enum DocumentStatus
     Validating,
     Validated,
     Rejected,
+    ReviewRequired,
 }
