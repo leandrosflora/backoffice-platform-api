@@ -19,5 +19,17 @@ public sealed class RecommendationRepository(BackofficeDbContext dbContext) : IR
         return recommendations.OrderByDescending(r => r.RecommendationVersion).FirstOrDefault();
     }
 
+    public async Task<IReadOnlyList<Recommendation>> ListByCaseAsync(
+        string tenantId,
+        Guid caseId,
+        CancellationToken cancellationToken = default)
+    {
+        var recommendations = await dbContext.Recommendations
+            .Where(r => r.TenantId == tenantId && r.CaseId == caseId)
+            .ToListAsync(cancellationToken);
+
+        return recommendations.OrderBy(r => r.RecommendationVersion).ToList();
+    }
+
     public void Add(Recommendation recommendation) => dbContext.Recommendations.Add(recommendation);
 }

@@ -11,5 +11,19 @@ public sealed class ApprovalRepository(BackofficeDbContext dbContext) : IApprova
         dbContext.Approvals.FirstOrDefaultAsync(
             a => a.TenantId == tenantId && a.CaseId == caseId && a.ApprovalId == approvalId, cancellationToken);
 
+    public async Task<IReadOnlyList<Approval>> ListByCaseAsync(
+        string tenantId,
+        Guid caseId,
+        CancellationToken cancellationToken = default)
+    {
+        // DateTimeOffset ordering is performed client-side because SQLite, used by API
+        // integration tests and local development, cannot translate this ORDER BY.
+        var approvals = await dbContext.Approvals
+            .Where(a => a.TenantId == tenantId && a.CaseId == caseId)
+            .ToListAsync(cancellationToken);
+
+        return approvals.OrderBy(a => a.DecidedAt).ToList();
+    }
+
     public void Add(Approval approval) => dbContext.Approvals.Add(approval);
 }

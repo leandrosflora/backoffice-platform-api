@@ -71,9 +71,11 @@ public static class DependencyInjection
         services.AddScoped<StartInvestigationHandler>();
         services.AddScoped<IRecommendationRepository, RecommendationRepository>();
         services.AddScoped<CreateRecommendationHandler>();
+        services.AddScoped<ListRecommendationsHandler>();
 
         services.AddScoped<IApprovalRepository, ApprovalRepository>();
         services.AddScoped<DecideApprovalHandler>();
+        services.AddScoped<ListApprovalsHandler>();
 
         services.AddScoped<IExecutionRepository, ExecutionRepository>();
         services.AddScoped<IIdempotencyRecordRepository, IdempotencyRecordRepository>();

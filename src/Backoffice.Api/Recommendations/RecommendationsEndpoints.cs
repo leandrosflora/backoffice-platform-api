@@ -9,6 +9,23 @@ public static class RecommendationsEndpoints
 {
     public static IEndpointRouteBuilder MapRecommendationsEndpoints(this IEndpointRouteBuilder app)
     {
+        app.MapGet("/v1/cases/{caseId:guid}/recommendations", async (
+            Guid caseId,
+            HttpRequest httpRequest,
+            ListRecommendationsHandler handler,
+            CancellationToken cancellationToken) =>
+        {
+            var tenantId = RequestContext.RequireTenantId(httpRequest);
+            var actorId = RequestContext.GetActorId(httpRequest);
+            var roles = RequestContext.GetRoles(httpRequest);
+            var subjectType = RequestContext.GetSubjectType(httpRequest);
+            var correlationId = RequestContext.GetOrCreateCorrelationId(httpRequest);
+
+            var response = await handler.HandleAsync(
+                tenantId, caseId, actorId, roles, subjectType, correlationId, cancellationToken);
+            return Results.Ok(response);
+        });
+
         app.MapPost("/v1/cases/{caseId:guid}/recommendations", async (
             Guid caseId,
             CreateRecommendationRequest request,
